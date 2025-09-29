@@ -40,31 +40,39 @@ Um chatbot inteligente para consultas sobre folha de pagamento, desenvolvido com
 
 1. **Clone o repositório**
    ```bash
-   git clone <repository-url>
-   cd chatbot_payroll
+   git clone https://github.com/gahdante/payroll-chatbot.git
+   cd payroll-chatbot
    ```
 
-2. **Instale as dependências**
+2. **Crie um ambiente virtual**
+   ```bash
+   python -m venv venv
+   venv\Scripts\activate  # Windows
+   # ou
+   source venv/bin/activate  # Linux/Mac
+   ```
+
+3. **Instale as dependências**
    ```bash
    pip install -r requirements.txt
    ```
 
-3. **Configure as variáveis de ambiente**
+4. **Configure as variáveis de ambiente**
    ```bash
-   cp .env.example .env
+   cp config.example .env
    # Edite o arquivo .env com suas chaves de API
    ```
 
-4. **Execute a aplicação**
+5. **Execute a aplicação**
    ```bash
-   python -m uvicorn app.main:app --reload
+   python run.py
    ```
 
 ## 🔧 Configuração
 
 ### Variáveis de Ambiente
 
-Crie um arquivo `.env` baseado no `.env.example`:
+Crie um arquivo `.env` baseado no `config.example`:
 
 ```env
 # Configurações do LLM
@@ -128,7 +136,7 @@ Execute os testes com:
 
 ```bash
 # Todos os testes
-pytest
+python test.py
 
 # Testes específicos
 pytest tests/test_queries.py

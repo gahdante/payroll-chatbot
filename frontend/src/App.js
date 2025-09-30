@@ -115,9 +115,9 @@ function App() {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100">
+    <div className="h-screen bg-gradient-to-br from-blue-50 to-indigo-100 flex flex-col">
       {/* Header */}
-      <div className="bg-white shadow-sm border-b">
+      <div className="bg-white shadow-sm border-b flex-shrink-0">
         <div className="max-w-4xl mx-auto px-4 py-4">
           <div className="flex items-center justify-between">
             <div className="flex items-center space-x-3">
@@ -151,10 +151,10 @@ function App() {
         </div>
       </div>
 
-      <div className="max-w-4xl mx-auto flex">
+      <div className="flex-1 flex overflow-hidden">
         {/* Sidebar */}
-        <div className="w-80 bg-white shadow-sm border-r min-h-screen p-6">
-          <div className="space-y-6">
+        <div className="w-80 bg-white shadow-sm border-r flex-shrink-0 overflow-y-auto">
+          <div className="p-6 space-y-6">
             <div>
               <h3 className="text-lg font-semibold text-gray-900 mb-3">💡 Exemplos de Perguntas</h3>
               <div className="space-y-2">
@@ -191,7 +191,7 @@ function App() {
         </div>
 
         {/* Chat Area */}
-        <div className="flex-1 flex flex-col">
+        <div className="flex-1 flex flex-col min-w-0">
           {/* Messages */}
           <div className="flex-1 overflow-y-auto p-6 space-y-4">
             {messages.length === 0 && (
@@ -277,7 +277,7 @@ function App() {
           </div>
 
           {/* Input */}
-          <div className="bg-white border-t p-4">
+          <div className="bg-white border-t p-4 flex-shrink-0">
             <form onSubmit={handleSubmit} className="flex space-x-3">
               <div className="flex-1">
                 <input

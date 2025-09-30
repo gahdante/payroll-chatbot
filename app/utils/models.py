@@ -18,7 +18,7 @@ class ChatRequest(BaseModel):
 class ChatResponse(BaseModel):
     """Modelo para resposta do chat"""
     response: str = Field(..., description="Resposta do chatbot")
-    evidence: Optional[Dict[str, Any]] = Field(None, description="Evidências da resposta")
+    evidence: Optional[List[Dict[str, Any]]] = Field(None, description="Evidências da resposta")
     tool_used: str = Field(..., description="Ferramenta utilizada (rag, web, general)")
     
     class Config:

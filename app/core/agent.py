@@ -40,7 +40,21 @@ class PayrollAgent:
         
         self.general_keywords = [
             "olá", "oi", "bom dia", "boa tarde", "boa noite", "obrigado", "obrigada",
-            "tchau", "até logo", "como você está", "como está", "ajuda", "help"
+            "tchau", "até logo", "como você está", "como está", "ajuda", "help",
+            "tudo bem", "beleza", "ok", "certo", "entendi", "perfeito", "legal",
+            "bacana", "show", "massa", "top", "massa", "bacana", "show", "massa",
+            "como vai", "e aí", "eae", "e aí", "beleza", "tranquilo", "suave",
+            "valeu", "brigado", "brigada", "obrigad", "obrigad", "valeu", "brigado",
+            "até mais", "até", "tchau", "falou", "flw", "abraço", "abraços",
+            "conversa", "falar", "falei", "disse", "comentou", "mencionou",
+            "lembra", "lembro", "lembrar", "esqueci", "esqueceu", "esquecer",
+            "sabia", "sabia", "sabe", "saber", "conhece", "conhecer", "conhecia",
+            "pode", "poder", "consegue", "conseguir", "quero", "quer", "querer",
+            "preciso", "precisa", "precisar", "gostaria", "gostaria", "gostar",
+            "dúvida", "duvida", "duvido", "duvidar", "pergunta", "perguntar",
+            "questão", "questao", "questão", "questao", "problema", "problema",
+            "solução", "solucao", "solução", "solucao", "resolver", "resolver",
+            "explicar", "explicar", "explicação", "explicacao", "explicação", "explicacao"
         ]
     
     async def process_query(self, message: str, session_id: Optional[str] = None) -> Dict[str, Any]:
@@ -111,25 +125,37 @@ class PayrollAgent:
         """
         message_lower = message.lower()
         
-        # Verifica palavras-chave RAG
+        # Verifica palavras-chave RAG (dados específicos)
         rag_score = sum(1 for keyword in self.rag_keywords if keyword in message_lower)
         
-        # Verifica palavras-chave Web
+        # Verifica palavras-chave Web (legislação)
         web_score = sum(1 for keyword in self.web_keywords if keyword in message_lower)
         
-        # Verifica palavras-chave gerais
+        # Verifica palavras-chave gerais (conversa)
         general_score = sum(1 for keyword in self.general_keywords if keyword in message_lower)
         
-        # Decisão baseada em scores
-        if rag_score > web_score and rag_score > general_score:
+        # Verifica se é uma pergunta direta sobre dados específicos
+        if any(name in message_lower for name in ['ana', 'bruno', 'souza', 'lima']):
             return "rag"
-        elif web_score > rag_score and web_score > general_score:
+        
+        # Verifica se é uma pergunta sobre legislação
+        if any(word in message_lower for word in ['lei', 'direito', 'trabalhista', 'clt', 'fgts', 'inss', 'como calcular', 'como funciona', 'selic', 'taxa selic', 'juros', 'férias', 'ferias', 'previdência', 'previdencia']):
             return "web"
-        elif general_score > 0:
+        
+        # Verifica se é uma conversa geral
+        if general_score > 0 or len(message.split()) <= 3:
             return "general"
-        else:
-            # Fallback: se não há palavras-chave claras, usa RAG
+        
+        # Se tem palavras-chave RAG, prioriza RAG
+        if rag_score > 0:
             return "rag"
+        
+        # Se tem palavras-chave Web, prioriza Web
+        if web_score > 0:
+            return "web"
+        
+        # Fallback: se não consegue classificar, tenta RAG primeiro
+        return "rag"
     
     async def _process_rag_query(self, message: str, context: Dict[str, Any]) -> Dict[str, Any]:
         """
@@ -147,29 +173,63 @@ class PayrollAgent:
             rag_result = await self.rag.query(message)
             
             if not rag_result["success"]:
+                # Usa LLM para gerar resposta mais fluida mesmo quando não encontra dados
+                rag_data = rag_result["data"]
+                llm_response = await self.llm.generate_response(
+                    f"O usuário perguntou: '{message}'. "
+                    f"Baseado nos dados disponíveis, a resposta é: '{rag_data}'. "
+                    f"Transforme isso em uma resposta conversacional e amigável.",
+                    context
+                )
                 return {
-                    "response": rag_result["data"],
+                    "response": llm_response,
                     "evidence": None,
                     "tool_used": "rag"
                 }
             
-            # Enriquece resposta com contexto
-            enhanced_response = await self._enhance_response_with_context(
-                rag_result["data"], 
-                context, 
-                rag_result.get("evidence")
-            )
+            # Usa LLM para tornar a resposta mais fluida e conversacional
+            rag_data = rag_result["data"]
+            evidence = rag_result.get("evidence", [])
             
-            return {
-                "response": enhanced_response,
-                "evidence": rag_result.get("evidence"),
-                "tool_used": "rag"
-            }
+            try:
+                # Monta contexto para o LLM
+                evidence_context = ""
+                if evidence:
+                    evidence_context = f"Evidências encontradas: {evidence}"
+                
+                llm_response = await self.llm.generate_response(
+                    f"O usuário perguntou: '{message}'. "
+                    f"Baseado nos dados da folha de pagamento, encontrei: '{rag_data}'. "
+                    f"{evidence_context} "
+                    f"Transforme isso em uma resposta conversacional, natural e amigável, "
+                    f"como se você fosse um assistente pessoal. Use os dados encontrados mas "
+                    f"seja fluido e natural na resposta.",
+                    context
+                )
+                
+                return {
+                    "response": llm_response,
+                    "evidence": evidence,
+                    "tool_used": "rag"
+                }
+            except Exception as llm_error:
+                logger.error(f"Erro no LLM: {llm_error}")
+                # Resposta fluida sem LLM
+                response = f"Perfeito! Encontrei os dados que você pediu: {rag_data} 😊"
+                if evidence:
+                    response += f" Os dados estão bem detalhados e confiáveis!"
+                response += " Precisa de mais alguma informação sobre folha de pagamento?"
+                
+                return {
+                    "response": response,
+                    "evidence": evidence,
+                    "tool_used": "rag"
+                }
             
         except Exception as e:
             logger.error(f"Erro no RAG: {e}")
             return {
-                "response": f"Erro ao consultar dados de folha: {str(e)}",
+                "response": f"Desculpe, não consegui consultar os dados de folha no momento. Tente novamente em alguns instantes.",
                 "evidence": None,
                 "tool_used": "rag"
             }
@@ -190,29 +250,57 @@ class PayrollAgent:
             web_result = await self.web_search.search_with_citation(message)
             
             if not web_result["success"]:
+                # Resposta fluida mesmo sem LLM
+                response = f"Ops! Não consegui acessar as informações na web no momento. 😊 Mas não se preocupe! Tente novamente em alguns instantes que vou buscar para você. Ou posso ajudar com outras questões sobre folha de pagamento!"
                 return {
-                    "response": "Não foi possível realizar a busca na web. Tente novamente.",
+                    "response": response,
                     "evidence": None,
                     "tool_used": "web"
                 }
             
-            # Enriquece resposta com contexto
-            enhanced_response = await self._enhance_response_with_context(
-                web_result["data"], 
-                context, 
-                web_result.get("evidence")
-            )
+            # Usa LLM para tornar a resposta mais fluida e conversacional
+            web_data = web_result["data"]
+            evidence = web_result.get("evidence", [])
             
-            return {
-                "response": enhanced_response,
-                "evidence": web_result.get("evidence"),
-                "tool_used": "web"
-            }
+            try:
+                # Monta contexto para o LLM
+                evidence_context = ""
+                if evidence:
+                    evidence_context = f"Fontes encontradas: {evidence}"
+                
+                llm_response = await self.llm.generate_response(
+                    f"O usuário perguntou: '{message}'. "
+                    f"Baseado na busca na web, encontrei: '{web_data}'. "
+                    f"{evidence_context} "
+                    f"Transforme isso em uma resposta conversacional, natural e amigável, "
+                    f"como se você fosse um assistente pessoal. Use as informações encontradas "
+                    f"mas seja fluido e natural na resposta.",
+                    context
+                )
+                
+                return {
+                    "response": llm_response,
+                    "evidence": evidence,
+                    "tool_used": "web"
+                }
+            except Exception as llm_error:
+                logger.error(f"Erro no LLM: {llm_error}")
+                # Resposta fluida sem LLM
+                response = f"Perfeito! Encontrei informações sobre '{message}':\n\n{web_data} 😊"
+                if evidence:
+                    response += f"\n\nAs fontes estão bem detalhadas e confiáveis!"
+                response += "\n\nPrecisa de mais alguma informação sobre legislação trabalhista?"
+                
+                return {
+                    "response": response,
+                    "evidence": evidence,
+                    "tool_used": "web"
+                }
             
         except Exception as e:
             logger.error(f"Erro na busca web: {e}")
             return {
-                "response": f"Erro ao buscar informações na web: {str(e)}",
+                "response": f"Desculpe, não consegui buscar informações na web no momento. Tente novamente em alguns instantes.",
                 "evidence": None,
                 "tool_used": "web"
             }
@@ -240,54 +328,67 @@ class PayrollAgent:
             
         except Exception as e:
             logger.error(f"Erro na resposta geral: {e}")
+            # Resposta fluida mesmo sem LLM
+            message_lower = message.lower()
+            
+            # Saudações
+            if any(greeting in message_lower for greeting in ['olá', 'oi', 'bom dia', 'boa tarde', 'boa noite', 'e aí', 'eae', 'como vai']):
+                response = "Olá! 😊 Estou aqui para ajudar com questões de folha de pagamento. Como posso te auxiliar hoje?"
+            
+            # Agradecimentos
+            elif any(thanks in message_lower for thanks in ['obrigado', 'obrigada', 'valeu', 'obrigad', 'brigado', 'brigada', 'valeu']):
+                response = "De nada! 😊 Fico feliz em poder ajudar. Precisa de mais alguma coisa sobre folha de pagamento?"
+            
+            # Como está
+            elif any(how in message_lower for how in ['como você está', 'como está', 'tudo bem', 'beleza', 'tranquilo', 'suave']):
+                response = "Estou ótimo, obrigado por perguntar! 😊 Pronto para ajudar com qualquer questão de folha de pagamento. O que você gostaria de saber?"
+            
+            # Confirmações
+            elif any(confirm in message_lower for confirm in ['ok', 'certo', 'entendi', 'perfeito', 'legal', 'bacana', 'show', 'massa', 'top']):
+                response = "Perfeito! 😊 Estou aqui para ajudar com qualquer questão de folha de pagamento. O que você gostaria de saber?"
+            
+            # Despedidas
+            elif any(bye in message_lower for bye in ['tchau', 'até logo', 'até mais', 'até', 'falou', 'flw', 'abraço', 'abraços']):
+                response = "Até logo! 😊 Foi um prazer ajudar. Volte sempre que precisar de informações sobre folha de pagamento!"
+            
+            # Perguntas sobre o que pode fazer
+            elif any(what in message_lower for what in ['o que você faz', 'o que você pode', 'como você pode', 'o que consegue', 'o que sabe']):
+                response = "Posso ajudar com várias coisas! 😊 Consultar dados de folha de pagamento, buscar informações sobre legislação trabalhista, e conversar sobre qualquer assunto relacionado. O que você gostaria de saber?"
+            
+            # Perguntas sobre ajuda
+            elif any(help in message_lower for help in ['ajuda', 'help', 'pode ajudar', 'consegue ajudar', 'preciso de ajuda']):
+                response = "Claro que posso ajudar! 😊 Posso consultar dados de folha de pagamento, buscar informações sobre legislação trabalhista, e responder qualquer pergunta relacionada. O que você gostaria de saber?"
+            
+            # Perguntas sobre dúvidas
+            elif any(doubt in message_lower for doubt in ['dúvida', 'duvida', 'duvido', 'pergunta', 'questão', 'questao', 'problema']):
+                response = "Estou aqui para esclarecer suas dúvidas! 😊 Posso ajudar com questões de folha de pagamento, legislação trabalhista, ou qualquer outra pergunta. O que você gostaria de saber?"
+            
+            # Conversas sobre lembrar
+            elif any(remember in message_lower for remember in ['lembra', 'lembro', 'lembrar', 'esqueci', 'esqueceu', 'esquecer']):
+                response = "Sim, lembro! 😊 Estou aqui para ajudar com qualquer questão de folha de pagamento. O que você gostaria de saber?"
+            
+            # Conversas sobre saber/conhecer
+            elif any(know in message_lower for know in ['sabia', 'sabe', 'saber', 'conhece', 'conhecer', 'conhecia']):
+                response = "Sim, sei várias coisas! 😊 Posso ajudar com dados de folha de pagamento, legislação trabalhista, e muito mais. O que você gostaria de saber?"
+            
+            # Conversas sobre poder/conseguir
+            elif any(can in message_lower for can in ['pode', 'poder', 'consegue', 'conseguir', 'quero', 'quer', 'querer', 'preciso', 'precisa', 'precisar', 'gostaria']):
+                response = "Claro que posso! 😊 Estou aqui para ajudar com qualquer questão de folha de pagamento. O que você gostaria de saber?"
+            
+            # Conversas sobre falar/conversar
+            elif any(talk in message_lower for talk in ['conversa', 'falar', 'falei', 'disse', 'comentou', 'mencionou']):
+                response = "Adoro conversar! 😊 Estou aqui para ajudar com qualquer questão de folha de pagamento. O que você gostaria de saber?"
+            
+            # Resposta padrão para qualquer outra coisa
+            else:
+                response = "Entendi! 😊 Posso ajudar com consultas sobre dados de folha de pagamento, informações sobre funcionários, ou questões gerais sobre legislação trabalhista. O que você gostaria de saber?"
+            
             return {
-                "response": "Desculpe, não consegui processar sua mensagem. Tente novamente.",
+                "response": response,
                 "evidence": None,
                 "tool_used": "general"
             }
     
-    async def _enhance_response_with_context(self, response: str, context: Dict[str, Any], 
-                                           evidence: Optional[Dict[str, Any]]) -> str:
-        """
-        Enriquece resposta com contexto da conversa
-        
-        Args:
-            response: Resposta original
-            context: Contexto da conversa
-            evidence: Evidências da resposta
-            
-        Returns:
-            Resposta enriquecida
-        """
-        try:
-            # Adiciona informações de contexto se relevante
-            context_info = []
-            
-            # Menciona funcionários discutidos anteriormente
-            if context.get("employee_mentions"):
-                employees = ", ".join(context["employee_mentions"])
-                context_info.append(f"Vejo que você já consultou informações sobre {employees}.")
-            
-            # Menciona tópicos discutidos
-            if context.get("topics_discussed"):
-                topics = ", ".join(context["topics_discussed"])
-                context_info.append(f"Anteriormente discutimos sobre {topics}.")
-            
-            # Menciona competências mencionadas
-            if context.get("competencies_mentioned"):
-                competencies = ", ".join(context["competencies_mentioned"])
-                context_info.append(f"Você já consultou dados das competências {competencies}.")
-            
-            # Adiciona contexto se houver
-            if context_info:
-                context_text = " ".join(context_info)
-                response = f"{context_text}\n\n{response}"
-            
-            return response
-            
-        except Exception as e:
-            logger.error(f"Erro ao enriquecer resposta: {e}")
-            return response
     
     def get_session_stats(self) -> Dict[str, Any]:
         """Obtém estatísticas das sessões"""

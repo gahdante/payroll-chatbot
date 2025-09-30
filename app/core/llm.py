@@ -5,6 +5,10 @@ import os
 from openai import AsyncOpenAI
 from typing import Optional, Dict, Any
 import logging
+from dotenv import load_dotenv
+
+# Carrega variáveis de ambiente do arquivo .env
+load_dotenv()
 
 logger = logging.getLogger(__name__)
 
@@ -23,27 +27,35 @@ class LLMConfig:
     
     async def generate_response(
         self, 
-        messages: list, 
-        temperature: Optional[float] = None,
-        max_tokens: Optional[int] = None
+        message: str, 
+        context: Optional[Dict[str, Any]] = None
     ) -> str:
         """
-        Gera resposta do LLM
+        Gera resposta do LLM para consultas gerais
         
         Args:
-            messages: Lista de mensagens para o chat
-            temperature: Temperatura para geração (opcional)
-            max_tokens: Máximo de tokens (opcional)
+            message: Mensagem do usuário
+            context: Contexto da conversa (opcional)
         
         Returns:
             Resposta gerada pelo LLM
         """
         try:
+            # Monta mensagens para o chat
+            messages = [
+                {"role": "system", "content": self.get_system_prompt()},
+                {"role": "user", "content": message}
+            ]
+            
+            # Adiciona contexto se disponível
+            if context:
+                context_text = f"Contexto da conversa: {context}"
+                messages.insert(-1, {"role": "system", "content": context_text})
+            
             response = await self.client.chat.completions.create(
                 model=self.model,
                 messages=messages,
-                temperature=temperature or self.temperature,
-                max_tokens=max_tokens
+                temperature=self.temperature
             )
             
             return response.choices[0].message.content.strip()
@@ -52,42 +64,6 @@ class LLMConfig:
             logger.error(f"Erro ao gerar resposta do LLM: {e}")
             raise
     
-    async def generate_with_tools(
-        self,
-        messages: list,
-        tools: list,
-        tool_choice: Optional[str] = None
-    ) -> Dict[str, Any]:
-        """
-        Gera resposta do LLM com ferramentas disponíveis
-        
-        Args:
-            messages: Lista de mensagens
-            tools: Lista de ferramentas disponíveis
-            tool_choice: Ferramenta específica a ser usada (opcional)
-        
-        Returns:
-            Dicionário com resposta e informações sobre ferramentas usadas
-        """
-        try:
-            response = await self.client.chat.completions.create(
-                model=self.model,
-                messages=messages,
-                tools=tools,
-                tool_choice=tool_choice
-            )
-            
-            message = response.choices[0].message
-            
-            return {
-                "content": message.content,
-                "tool_calls": message.tool_calls,
-                "role": message.role
-            }
-        
-        except Exception as e:
-            logger.error(f"Erro ao gerar resposta com ferramentas: {e}")
-            raise
     
     def get_system_prompt(self) -> str:
         """

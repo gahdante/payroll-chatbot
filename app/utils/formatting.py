@@ -1,40 +1,37 @@
 """
-Funções para R$ (BRL) e parsing/validação de datas
+Utilitários de formatação para o sistema de folha de pagamento
+Implementa formatação brasileira de moeda, datas e números
 """
 import re
-from typing import Optional, Union
 from datetime import datetime
-import locale
+from typing import Union, Optional, List
 
-def format_currency(value: Union[float, int, str]) -> str:
+def format_currency(value: Union[float, str, int]) -> str:
     """
-    Formata valor monetário em Real brasileiro (R$)
+    Formata valor em moeda brasileira (R$ 1.500,50)
     
     Args:
         value: Valor a ser formatado
-    
+        
     Returns:
-        String formatada em R$ brasileiro
+        String formatada em moeda brasileira
     """
     try:
         # Converte para float se necessário
         if isinstance(value, str):
-            # Remove caracteres não numéricos exceto ponto e vírgula
-            clean_value = re.sub(r'[^\d.,]', '', value)
+            # Remove caracteres não numéricos exceto vírgula e ponto
+            value = re.sub(r'[^\d,.-]', '', value)
             # Substitui vírgula por ponto para conversão
-            clean_value = clean_value.replace(',', '.')
-            value = float(clean_value)
-        elif isinstance(value, int):
+            value = value.replace(',', '.')
             value = float(value)
         
         # Formata com 2 casas decimais
-        formatted = f"R$ {value:,.2f}"
+        formatted = f"{float(value):,.2f}"
         
-        # Substitui vírgula por ponto para separador de milhares
-        # e ponto por vírgula para separador decimal (padrão brasileiro)
+        # Substitui vírgula por X, ponto por vírgula, X por ponto
         formatted = formatted.replace(',', 'X').replace('.', ',').replace('X', '.')
         
-        return formatted
+        return f"R$ {formatted}"
         
     except (ValueError, TypeError):
         return "R$ 0,00"
@@ -44,230 +41,184 @@ def parse_currency(value: str) -> Optional[float]:
     Converte string de moeda para float
     
     Args:
-        value: String com valor monetário (ex: "R$ 1.500,00")
-    
+        value: String com valor monetário
+        
     Returns:
         Float com o valor ou None se inválido
     """
     try:
-        # Remove R$ e espaços
-        clean_value = re.sub(r'R\$\s*', '', value)
+        if not value:
+            return None
+            
+        # Remove caracteres não numéricos exceto vírgula e ponto
+        cleaned = re.sub(r'[^\d,.-]', '', value)
         
-        # Remove pontos (separadores de milhares)
-        clean_value = clean_value.replace('.', '')
+        if not cleaned:
+            return None
         
-        # Substitui vírgula por ponto (separador decimal)
-        clean_value = clean_value.replace(',', '.')
+        # Se tem vírgula e ponto, assume formato brasileiro (1.500,50)
+        if ',' in cleaned and '.' in cleaned:
+            # Remove pontos de milhares e substitui vírgula por ponto
+            cleaned = cleaned.replace('.', '').replace(',', '.')
+        elif ',' in cleaned and '.' not in cleaned:
+            # Apenas vírgula, assume formato brasileiro
+            cleaned = cleaned.replace(',', '.')
         
-        return float(clean_value)
+        return float(cleaned)
         
     except (ValueError, TypeError):
         return None
 
-def format_date(date_value: Union[str, datetime], format_input: str = "%Y-%m-%d") -> str:
+def format_date(date_input: Union[str, datetime]) -> str:
     """
-    Formata data para padrão brasileiro (dd/mm/aaaa)
+    Formata data para formato brasileiro (dd/mm/aaaa)
     
     Args:
-        date_value: Data a ser formatada
-        format_input: Formato de entrada da data
-    
+        date_input: Data em string ou datetime
+        
     Returns:
         String formatada em dd/mm/aaaa
     """
     try:
-        if isinstance(date_value, str):
-            date_obj = datetime.strptime(date_value, format_input)
+        if isinstance(date_input, str):
+            # Tenta diferentes formatos de entrada
+            formats = [
+                '%Y-%m-%d',      # 2025-01-28
+                '%d/%m/%Y',      # 28/01/2025
+                '%d-%m-%Y',      # 28-01-2025
+                '%Y/%m/%d',      # 2025/01/28
+            ]
+            
+            for fmt in formats:
+                try:
+                    date_obj = datetime.strptime(date_input, fmt)
+                    return date_obj.strftime('%d/%m/%Y')
+                except ValueError:
+                    continue
+            
+            # Se nenhum formato funcionou, retorna como está
+            return date_input
+            
+        elif isinstance(date_input, datetime):
+            return date_input.strftime('%d/%m/%Y')
         else:
-            date_obj = date_value
-        
-        return date_obj.strftime("%d/%m/%Y")
-        
-    except (ValueError, TypeError):
+            return str(date_input)
+            
+    except Exception:
         return "Data inválida"
 
-def parse_date(date_string: str, format_output: str = "%Y-%m-%d") -> Optional[str]:
+def parse_date(date_str: str) -> Optional[str]:
     """
-    Converte data do formato brasileiro para formato ISO
+    Converte string de data para formato YYYY-MM-DD
     
     Args:
-        date_string: Data em formato brasileiro (dd/mm/aaaa)
-        format_output: Formato de saída desejado
-    
+        date_str: String com data
+        
     Returns:
-        String com data no formato ISO ou None se inválida
+        String no formato YYYY-MM-DD ou None se inválido
     """
     try:
+        if not date_str:
+            return None
+        
+        # Remove espaços extras
+        date_str = date_str.strip()
+        
         # Tenta diferentes formatos de entrada
-        formats = ["%d/%m/%Y", "%d-%m-%Y", "%Y-%m-%d", "%d/%m/%y"]
+        formats = [
+            '%d/%m/%Y',      # 28/01/2025
+            '%d-%m-%Y',      # 28-01-2025
+            '%Y-%m-%d',      # 2025-01-28
+            '%Y/%m/%d',      # 2025/01/28
+        ]
         
         for fmt in formats:
             try:
-                date_obj = datetime.strptime(date_string, fmt)
-                return date_obj.strftime(format_output)
+                date_obj = datetime.strptime(date_str, fmt)
+                return date_obj.strftime('%Y-%m-%d')
             except ValueError:
                 continue
         
         return None
         
-    except (ValueError, TypeError):
+    except Exception:
         return None
 
-def validate_date_range(start_date: str, end_date: str) -> bool:
+
+def format_competency(competency: str) -> str:
     """
-    Valida se o intervalo de datas é válido
+    Formata competência para exibição
     
     Args:
-        start_date: Data inicial
-        end_date: Data final
-    
+        competency: Competência no formato YYYY-MM
+        
     Returns:
-        True se válido, False caso contrário
+        Competência formatada
     """
     try:
-        start = datetime.strptime(start_date, "%Y-%m-%d")
-        end = datetime.strptime(end_date, "%Y-%m-%d")
+        if not competency:
+            return ""
         
-        return start <= end
+        # Se já está no formato YYYY-MM
+        if re.match(r'\d{4}-\d{2}', competency):
+            year, month = competency.split('-')
+            
+            # Mapeamento de meses
+            month_names = {
+                '01': 'Janeiro', '02': 'Fevereiro', '03': 'Março',
+                '04': 'Abril', '05': 'Maio', '06': 'Junho',
+                '07': 'Julho', '08': 'Agosto', '09': 'Setembro',
+                '10': 'Outubro', '11': 'Novembro', '12': 'Dezembro'
+            }
+            
+            month_name = month_names.get(month, month)
+            return f"{month_name}/{year}"
         
-    except (ValueError, TypeError):
-        return False
+        return competency
+        
+    except Exception:
+        return competency
 
-def format_percentage(value: Union[float, int], decimals: int = 2) -> str:
+def parse_competency(competency: str) -> Optional[str]:
     """
-    Formata valor como porcentagem
+    Converte competência para formato YYYY-MM
     
     Args:
-        value: Valor a ser formatado
-        decimals: Número de casas decimais
-    
+        competency: Competência em formato variado
+        
     Returns:
-        String formatada como porcentagem
+        Competência no formato YYYY-MM ou None se inválido
     """
     try:
-        if isinstance(value, str):
-            value = float(value)
+        if not competency:
+            return None
         
-        return f"{value:.{decimals}f}%"
+        competency = competency.strip()
         
-    except (ValueError, TypeError):
-        return "0,00%"
-
-def format_number(value: Union[float, int, str], decimals: int = 2) -> str:
-    """
-    Formata número com separadores de milhares
-    
-    Args:
-        value: Valor a ser formatado
-        decimals: Número de casas decimais
-    
-    Returns:
-        String formatada com separadores
-    """
-    try:
-        if isinstance(value, str):
-            value = float(value)
+        # Se já está no formato YYYY-MM
+        if re.match(r'\d{4}-\d{2}', competency):
+            return competency
         
-        # Formata com separadores
-        formatted = f"{value:,.{decimals}f}"
+        # Tenta converter de outros formatos
+        # Ex: "Janeiro/2025" -> "2025-01"
+        month_mapping = {
+            'janeiro': '01', 'fevereiro': '02', 'março': '03',
+            'abril': '04', 'maio': '05', 'junho': '06',
+            'julho': '07', 'agosto': '08', 'setembro': '09',
+            'outubro': '10', 'novembro': '11', 'dezembro': '12'
+        }
         
-        # Ajusta para padrão brasileiro
-        formatted = formatted.replace(',', 'X').replace('.', ',').replace('X', '.')
+        # Padrão: mês/ano ou mês-ano
+        pattern = r'(\w+)[/-](\d{4})'
+        match = re.search(pattern, competency.lower())
         
-        return formatted
+        if match:
+            month_name, year = match.groups()
+            month_num = month_mapping.get(month_name)
+            if month_num:
+                return f"{year}-{month_num}"
         
-    except (ValueError, TypeError):
-        return "0,00"
-
-def clean_text(text: str) -> str:
-    """
-    Limpa texto removendo caracteres especiais e normalizando
-    
-    Args:
-        text: Texto a ser limpo
-    
-    Returns:
-        Texto limpo
-    """
-    if not text:
-        return ""
-    
-    # Remove caracteres especiais
-    cleaned = re.sub(r'[^\w\s]', '', text)
-    
-    # Remove espaços extras
-    cleaned = re.sub(r'\s+', ' ', cleaned)
-    
-    # Remove espaços no início e fim
-    cleaned = cleaned.strip()
-    
-    return cleaned
-
-def extract_numbers(text: str) -> list:
-    """
-    Extrai números de um texto
-    
-    Args:
-        text: Texto para extrair números
-    
-    Returns:
-        Lista de números encontrados
-    """
-    numbers = re.findall(r'\d+\.?\d*', text)
-    return [float(num) for num in numbers if num]
-
-def format_employee_name(name: str) -> str:
-    """
-    Formata nome do funcionário (primeira letra maiúscula)
-    
-    Args:
-        name: Nome do funcionário
-    
-    Returns:
-        Nome formatado
-    """
-    if not name:
-        return ""
-    
-    # Divide em palavras
-    words = name.split()
-    
-    # Capitaliza cada palavra
-    formatted_words = [word.capitalize() for word in words]
-    
-    return " ".join(formatted_words)
-
-def format_department_name(dept: str) -> str:
-    """
-    Formata nome do departamento
-    
-    Args:
-        dept: Nome do departamento
-    
-    Returns:
-        Nome formatado
-    """
-    if not dept:
-        return ""
-    
-    # Converte para maiúsculo
-    return dept.upper()
-
-def format_position_name(position: str) -> str:
-    """
-    Formata nome do cargo
-    
-    Args:
-        position: Nome do cargo
-    
-    Returns:
-        Nome formatado
-    """
-    if not position:
-        return ""
-    
-    # Capitaliza primeira letra de cada palavra
-    words = position.split()
-    formatted_words = [word.capitalize() for word in words]
-    
-    return " ".join(formatted_words)
+        return None
+        
+    except Exception:
+        return None

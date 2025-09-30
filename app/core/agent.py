@@ -1,14 +1,14 @@
 """
-Lógica central: decide qual ferramenta usar (RAG ou Web Search)
+Agente principal do chatbot de folha de pagamento
+Implementa lógica de decisão entre RAG, Web Search e conversa geral
 """
 import logging
 from typing import Dict, Any, Optional
-import re
 
 from .llm import LLMConfig
 from ..tools.payroll_rag import PayrollRAG
 from ..tools.web_search import WebSearch
-from ..utils.models import ChatRequest
+from .conversation_memory import ConversationMemory
 
 logger = logging.getLogger(__name__)
 
@@ -16,268 +16,288 @@ class PayrollAgent:
     """Agente principal que decide qual ferramenta usar"""
     
     def __init__(self):
+        """Inicializa o agente"""
         self.llm = LLMConfig()
         self.rag = PayrollRAG()
         self.web_search = WebSearch()
+        self.memory = ConversationMemory()
         
-        # Palavras-chave que indicam necessidade de RAG
+        # Palavras-chave para classificação de consultas
         self.rag_keywords = [
             "funcionário", "funcionários", "salário", "salários", "folha", "pagamento",
             "nome", "cargo", "departamento", "data", "valor", "total", "média", "soma",
-            "quem", "quanto", "quando", "onde", "qual"
+            "quem", "quanto", "quando", "onde", "qual", "recebi", "recebeu", "ganhou",
+            "líquido", "líquida", "bruto", "bruta", "desconto", "descontos", "inss",
+            "irrf", "bônus", "bonus", "trimestre", "semestre", "competência"
         ]
         
-        # Palavras-chave que indicam necessidade de web search
         self.web_keywords = [
             "lei", "legislação", "direito", "direitos", "trabalhista", "trabalhistas",
             "clt", "fgts", "inss", "imposto", "tributo", "encargo", "encargos",
-            "como calcular", "como funciona", "o que é", "quando", "prazo", "prazo"
+            "como calcular", "como funciona", "o que é", "quando", "prazo", "prazo",
+            "selic", "taxa", "juros", "férias", "ferias", "13º", "13", "salário"
+        ]
+        
+        self.general_keywords = [
+            "olá", "oi", "bom dia", "boa tarde", "boa noite", "obrigado", "obrigada",
+            "tchau", "até logo", "como você está", "como está", "ajuda", "help"
         ]
     
-    async def process_query(self, message: str) -> Dict[str, Any]:
+    async def process_query(self, message: str, session_id: Optional[str] = None) -> Dict[str, Any]:
         """
-        Processa a consulta e decide qual ferramenta usar
+        Processa consulta do usuário
         
         Args:
             message: Mensagem do usuário
-        
+            session_id: ID da sessão (opcional)
+            
         Returns:
-            Dicionário com resposta, evidência e ferramenta usada
+            Resposta processada
         """
         try:
-            # Analisa a mensagem para decidir a ferramenta
-            tool_decision = await self._decide_tool(message)
+            # Cria sessão se não existir
+            if session_id is None:
+                session_id = self.memory.create_session()
             
-            if tool_decision == "rag":
-                return await self._handle_rag_query(message)
-            elif tool_decision == "web":
-                return await self._handle_web_query(message)
+            # Adiciona mensagem do usuário à memória
+            self.memory.add_message(session_id, "user", message)
+            
+            # Analisa o tipo de consulta
+            query_type = await self._analyze_query_type(message)
+            
+            # Obtém contexto da conversa
+            context = self.memory.get_context_summary(session_id)
+            
+            # Processa consulta baseada no tipo
+            if query_type == "rag":
+                result = await self._process_rag_query(message, context)
+            elif query_type == "web":
+                result = await self._process_web_query(message, context)
             else:
-                return await self._handle_general_query(message)
-                
+                result = await self._process_general_query(message, context)
+            
+            # Adiciona resposta à memória
+            self.memory.add_message(
+                session_id, 
+                "assistant", 
+                result["response"],
+                tool_used=result["tool_used"],
+                evidence=result.get("evidence")
+            )
+            
+            # Atualiza contexto
+            self.memory.update_context_data(session_id, "last_query_type", query_type)
+            self.memory.update_context_data(session_id, "last_tool_used", result["tool_used"])
+            
+            return result
+            
         except Exception as e:
             logger.error(f"Erro ao processar consulta: {e}")
             return {
-                "response": "Desculpe, ocorreu um erro ao processar sua consulta. Tente novamente.",
-                "evidence": "",
+                "response": f"Desculpe, ocorreu um erro ao processar sua consulta: {str(e)}",
+                "evidence": None,
                 "tool_used": "error"
             }
     
-    async def _decide_tool(self, message: str) -> str:
+    async def _analyze_query_type(self, message: str) -> str:
         """
-        Decide qual ferramenta usar baseado na mensagem
+        Analisa o tipo de consulta
         
         Args:
             message: Mensagem do usuário
-        
+            
         Returns:
-            "rag", "web" ou "general"
+            Tipo de consulta (rag, web, general)
         """
         message_lower = message.lower()
         
-        # Verifica se há palavras-chave para RAG
+        # Verifica palavras-chave RAG
         rag_score = sum(1 for keyword in self.rag_keywords if keyword in message_lower)
         
-        # Verifica se há palavras-chave para web search
+        # Verifica palavras-chave Web
         web_score = sum(1 for keyword in self.web_keywords if keyword in message_lower)
         
-        # Verifica padrões específicos
-        if re.search(r'\b(funcionário|funcionários)\b', message_lower):
-            rag_score += 2
+        # Verifica palavras-chave gerais
+        general_score = sum(1 for keyword in self.general_keywords if keyword in message_lower)
         
-        if re.search(r'\b(lei|legislação|direito)\b', message_lower):
-            web_score += 2
-        
-        # Decisão baseada nos scores
-        if rag_score > web_score and rag_score > 0:
+        # Decisão baseada em scores
+        if rag_score > web_score and rag_score > general_score:
             return "rag"
-        elif web_score > rag_score and web_score > 0:
+        elif web_score > rag_score and web_score > general_score:
             return "web"
-        else:
+        elif general_score > 0:
             return "general"
+        else:
+            # Fallback: se não há palavras-chave claras, usa RAG
+            return "rag"
     
-    async def _handle_rag_query(self, message: str) -> Dict[str, Any]:
+    async def _process_rag_query(self, message: str, context: Dict[str, Any]) -> Dict[str, Any]:
         """
-        Processa consulta usando RAG
+        Processa consulta RAG
         
         Args:
             message: Mensagem do usuário
-        
+            context: Contexto da conversa
+            
         Returns:
-            Resposta com dados do RAG
+            Resposta processada
         """
         try:
-            # Busca dados usando RAG
-            rag_results = await self.rag.query(message)
+            # Executa consulta RAG
+            rag_result = await self.rag.query(message)
             
-            if not rag_results or not rag_results.get("data"):
+            if not rag_result["success"]:
                 return {
-                    "response": "Não encontrei dados específicos para sua consulta nos registros de folha de pagamento.",
-                    "evidence": "",
+                    "response": rag_result["data"],
+                    "evidence": None,
                     "tool_used": "rag"
                 }
             
-            # Formata a resposta usando LLM
-            formatted_response = await self._format_rag_response(message, rag_results)
+            # Enriquece resposta com contexto
+            enhanced_response = await self._enhance_response_with_context(
+                rag_result["data"], 
+                context, 
+                rag_result.get("evidence")
+            )
             
             return {
-                "response": formatted_response,
-                "evidence": rag_results.get("evidence", ""),
+                "response": enhanced_response,
+                "evidence": rag_result.get("evidence"),
                 "tool_used": "rag"
             }
             
         except Exception as e:
             logger.error(f"Erro no RAG: {e}")
             return {
-                "response": "Erro ao consultar dados de folha de pagamento.",
-                "evidence": "",
+                "response": f"Erro ao consultar dados de folha: {str(e)}",
+                "evidence": None,
                 "tool_used": "rag"
             }
     
-    async def _handle_web_query(self, message: str) -> Dict[str, Any]:
+    async def _process_web_query(self, message: str, context: Dict[str, Any]) -> Dict[str, Any]:
         """
-        Processa consulta usando web search
+        Processa consulta de busca na web
         
         Args:
             message: Mensagem do usuário
-        
+            context: Contexto da conversa
+            
         Returns:
-            Resposta com dados da web
+            Resposta processada
         """
         try:
-            # Busca na web
-            web_results = await self.web_search.search(message)
+            # Executa busca na web
+            web_result = await self.web_search.search_with_citation(message)
             
-            if not web_results or not web_results.get("results"):
+            if not web_result["success"]:
                 return {
-                    "response": "Não consegui encontrar informações relevantes na web para sua consulta.",
-                    "evidence": "",
+                    "response": "Não foi possível realizar a busca na web. Tente novamente.",
+                    "evidence": None,
                     "tool_used": "web"
                 }
             
-            # Formata a resposta usando LLM
-            formatted_response = await self._format_web_response(message, web_results)
+            # Enriquece resposta com contexto
+            enhanced_response = await self._enhance_response_with_context(
+                web_result["data"], 
+                context, 
+                web_result.get("evidence")
+            )
             
             return {
-                "response": formatted_response,
-                "evidence": web_results.get("evidence", ""),
+                "response": enhanced_response,
+                "evidence": web_result.get("evidence"),
                 "tool_used": "web"
             }
             
         except Exception as e:
-            logger.error(f"Erro na web search: {e}")
+            logger.error(f"Erro na busca web: {e}")
             return {
-                "response": "Erro ao buscar informações na web.",
-                "evidence": "",
+                "response": f"Erro ao buscar informações na web: {str(e)}",
+                "evidence": None,
                 "tool_used": "web"
             }
     
-    async def _handle_general_query(self, message: str) -> Dict[str, Any]:
+    async def _process_general_query(self, message: str, context: Dict[str, Any]) -> Dict[str, Any]:
         """
-        Processa consulta geral usando apenas LLM
+        Processa consulta geral
         
         Args:
             message: Mensagem do usuário
-        
+            context: Contexto da conversa
+            
         Returns:
-            Resposta geral
+            Resposta processada
         """
         try:
-            system_prompt = self.llm.get_system_prompt()
-            
-            messages = [
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": message}
-            ]
-            
-            response = await self.llm.generate_response(messages)
+            # Gera resposta geral usando LLM
+            response = await self.llm.generate_response(message, context)
             
             return {
                 "response": response,
-                "evidence": "",
+                "evidence": None,
                 "tool_used": "general"
             }
             
         except Exception as e:
-            logger.error(f"Erro na consulta geral: {e}")
+            logger.error(f"Erro na resposta geral: {e}")
             return {
-                "response": "Desculpe, não consegui processar sua consulta.",
-                "evidence": "",
+                "response": "Desculpe, não consegui processar sua mensagem. Tente novamente.",
+                "evidence": None,
                 "tool_used": "general"
             }
     
-    async def _format_rag_response(self, message: str, rag_results: Dict[str, Any]) -> str:
+    async def _enhance_response_with_context(self, response: str, context: Dict[str, Any], 
+                                           evidence: Optional[Dict[str, Any]]) -> str:
         """
-        Formata resposta do RAG usando LLM
+        Enriquece resposta com contexto da conversa
         
         Args:
-            message: Mensagem original
-            rag_results: Resultados do RAG
-        
+            response: Resposta original
+            context: Contexto da conversa
+            evidence: Evidências da resposta
+            
         Returns:
-            Resposta formatada
+            Resposta enriquecida
         """
-        data = rag_results.get("data", "")
-        evidence = rag_results.get("evidence", "")
-        
-        prompt = f"""
-        Com base nos dados de folha de pagamento fornecidos, responda à pergunta do usuário.
-        
-        Pergunta: {message}
-        
-        Dados encontrados:
-        {data}
-        
-        Evidência:
-        {evidence}
-        
-        Formate a resposta de forma clara e profissional, incluindo valores em Real (R$) quando aplicável.
-        """
-        
-        messages = [
-            {"role": "system", "content": "Você é um especialista em folha de pagamento."},
-            {"role": "user", "content": prompt}
-        ]
-        
-        return await self.llm.generate_response(messages)
+        try:
+            # Adiciona informações de contexto se relevante
+            context_info = []
+            
+            # Menciona funcionários discutidos anteriormente
+            if context.get("employee_mentions"):
+                employees = ", ".join(context["employee_mentions"])
+                context_info.append(f"Vejo que você já consultou informações sobre {employees}.")
+            
+            # Menciona tópicos discutidos
+            if context.get("topics_discussed"):
+                topics = ", ".join(context["topics_discussed"])
+                context_info.append(f"Anteriormente discutimos sobre {topics}.")
+            
+            # Menciona competências mencionadas
+            if context.get("competencies_mentioned"):
+                competencies = ", ".join(context["competencies_mentioned"])
+                context_info.append(f"Você já consultou dados das competências {competencies}.")
+            
+            # Adiciona contexto se houver
+            if context_info:
+                context_text = " ".join(context_info)
+                response = f"{context_text}\n\n{response}"
+            
+            return response
+            
+        except Exception as e:
+            logger.error(f"Erro ao enriquecer resposta: {e}")
+            return response
     
-    async def _format_web_response(self, message: str, web_results: Dict[str, Any]) -> str:
-        """
-        Formata resposta da web search usando LLM
-        
-        Args:
-            message: Mensagem original
-            web_results: Resultados da web
-        
-        Returns:
-            Resposta formatada
-        """
-        results = web_results.get("results", [])
-        evidence = web_results.get("evidence", "")
-        
-        # Prepara contexto dos resultados
-        context = "\n".join([
-            f"- {result.get('title', '')}: {result.get('snippet', '')}"
-            for result in results[:3]  # Limita a 3 resultados
-        ])
-        
-        prompt = f"""
-        Com base nas informações encontradas na web, responda à pergunta do usuário sobre legislação trabalhista.
-        
-        Pergunta: {message}
-        
-        Informações encontradas:
-        {context}
-        
-        Evidência:
-        {evidence}
-        
-        Forneça uma resposta clara e baseada nas informações encontradas.
-        """
-        
-        messages = [
-            {"role": "system", "content": "Você é um especialista em legislação trabalhista brasileira."},
-            {"role": "user", "content": prompt}
-        ]
-        
-        return await self.llm.generate_response(messages)
+    def get_session_stats(self) -> Dict[str, Any]:
+        """Obtém estatísticas das sessões"""
+        return self.memory.get_session_stats()
+    
+    def get_context_summary(self, session_id: str) -> Dict[str, Any]:
+        """Obtém resumo do contexto da sessão"""
+        return self.memory.get_context_summary(session_id)
+    
+    def cleanup_sessions(self):
+        """Limpa sessões expiradas"""
+        self.memory.cleanup_old_sessions()
+    

@@ -1,136 +1,56 @@
 """
-Modelos Pydantic para Request/Response (incluindo a 'evidência')
+Modelos Pydantic para o sistema de folha de pagamento
 """
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, validator
 from typing import Optional, List, Dict, Any
+from datetime import datetime
 
 class ChatRequest(BaseModel):
-    """Modelo para requisições de chat"""
-    message: str = Field(..., description="Mensagem do usuário", min_length=1, max_length=1000)
+    """Modelo para requisição de chat"""
+    message: str = Field(..., min_length=1, max_length=1000, description="Mensagem do usuário")
     
-    class Config:
-        json_schema_extra = {
-            "example": {
-                "message": "Qual é o salário médio dos funcionários?"
-            }
-        }
+    @validator('message')
+    def validate_message(cls, v):
+        if not v or not v.strip():
+            raise ValueError('Mensagem não pode estar vazia')
+        return v.strip()
 
 class ChatResponse(BaseModel):
-    """Modelo para respostas de chat"""
+    """Modelo para resposta do chat"""
     response: str = Field(..., description="Resposta do chatbot")
-    evidence: str = Field(default="", description="Evidência da resposta (dados ou fontes)")
-    tool_used: str = Field(default="unknown", description="Ferramenta utilizada (rag, web, general)")
+    evidence: Optional[Dict[str, Any]] = Field(None, description="Evidências da resposta")
+    tool_used: str = Field(..., description="Ferramenta utilizada (rag, web, general)")
     
     class Config:
-        json_schema_extra = {
-            "example": {
-                "response": "O salário médio dos funcionários é R$ 5.500,00",
-                "evidence": "Baseado em 150 funcionários",
-                "tool_used": "rag"
-            }
+        json_encoders = {
+            datetime: lambda v: v.isoformat()
         }
 
-class EmployeeData(BaseModel):
-    """Modelo para dados de funcionário"""
-    nome: str = Field(..., description="Nome do funcionário")
-    cargo: str = Field(..., description="Cargo do funcionário")
-    departamento: str = Field(..., description="Departamento")
-    salario: float = Field(..., description="Salário em reais")
-    data: str = Field(..., description="Data de referência")
-    
-    class Config:
-        json_schema_extra = {
-            "example": {
-                "nome": "João Silva",
-                "cargo": "Desenvolvedor",
-                "departamento": "TI",
-                "salario": 7500.00,
-                "data": "2024-01-01"
-            }
-        }
+class EvidenceSource(BaseModel):
+    """Modelo para fonte de evidência"""
+    employee_id: str = Field(..., description="ID do funcionário")
+    name: str = Field(..., description="Nome do funcionário")
+    competency: str = Field(..., description="Competência")
+    payment_date: str = Field(..., description="Data de pagamento")
+    net_pay: Optional[float] = Field(None, description="Salário líquido")
+    base_salary: Optional[float] = Field(None, description="Salário base")
+    bonus: Optional[float] = Field(None, description="Bônus")
+    deductions_inss: Optional[float] = Field(None, description="Desconto INSS")
+    deductions_irrf: Optional[float] = Field(None, description="Desconto IRRF")
 
-class PayrollStats(BaseModel):
-    """Modelo para estatísticas de folha de pagamento"""
-    total_funcionarios: int = Field(..., description="Total de funcionários")
-    soma_salarios: float = Field(..., description="Soma total dos salários")
-    salario_medio: float = Field(..., description="Salário médio")
-    maior_salario: float = Field(..., description="Maior salário")
-    menor_salario: float = Field(..., description="Menor salário")
-    
-    class Config:
-        json_schema_extra = {
-            "example": {
-                "total_funcionarios": 150,
-                "soma_salarios": 825000.00,
-                "salario_medio": 5500.00,
-                "maior_salario": 15000.00,
-                "menor_salario": 2000.00
-            }
-        }
+class Evidence(BaseModel):
+    """Modelo para evidências da resposta"""
+    sources: List[EvidenceSource] = Field(..., description="Fontes de evidência")
+    total_records: int = Field(..., ge=0, description="Total de registros")
+    employee_ids: List[str] = Field(..., description="IDs dos funcionários")
+    competencies: List[str] = Field(..., description="Competências")
+    query_type: str = Field(..., description="Tipo de consulta")
+    confidence: float = Field(..., ge=0, le=1, description="Confiança na resposta")
 
-class WebSearchResult(BaseModel):
-    """Modelo para resultados de busca na web"""
-    title: str = Field(..., description="Título do resultado")
-    link: str = Field(..., description="URL do resultado")
-    snippet: str = Field(..., description="Snippet do resultado")
-    display_link: str = Field(..., description="Link de exibição")
-    
-    class Config:
-        json_schema_extra = {
-            "example": {
-                "title": "Consolidação das Leis do Trabalho (CLT)",
-                "link": "https://www.gov.br/trabalho-e-emprego/pt-br",
-                "snippet": "A CLT é a principal legislação trabalhista brasileira...",
-                "display_link": "gov.br"
-            }
-        }
-
-class RAGResult(BaseModel):
-    """Modelo para resultados do RAG"""
-    data: str = Field(..., description="Dados encontrados")
-    evidence: str = Field(..., description="Evidência dos dados")
-    success: bool = Field(..., description="Indica se a consulta foi bem-sucedida")
-    
-    class Config:
-        json_schema_extra = {
-            "example": {
-                "data": "João Silva - Desenvolvedor - R$ 7.500,00",
-                "evidence": "Baseado em dados de folha de pagamento",
-                "success": True
-            }
-        }
-
-class WebSearchResponse(BaseModel):
-    """Modelo para resposta de busca na web"""
-    results: List[WebSearchResult] = Field(..., description="Lista de resultados")
-    evidence: str = Field(..., description="Evidência da busca")
-    success: bool = Field(..., description="Indica se a busca foi bem-sucedida")
-    
-    class Config:
-        json_schema_extra = {
-            "example": {
-                "results": [
-                    {
-                        "title": "CLT - Consolidação das Leis do Trabalho",
-                        "link": "https://www.gov.br/trabalho-e-emprego/pt-br",
-                        "snippet": "A CLT é a principal legislação trabalhista...",
-                        "display_link": "gov.br"
-                    }
-                ],
-                "evidence": "Baseado em 3 resultados da web",
-                "success": True
-            }
-        }
-
-class ErrorResponse(BaseModel):
-    """Modelo para respostas de erro"""
-    error: str = Field(..., description="Mensagem de erro")
-    detail: Optional[str] = Field(None, description="Detalhes adicionais do erro")
-    
-    class Config:
-        json_schema_extra = {
-            "example": {
-                "error": "Erro interno do servidor",
-                "detail": "Falha ao processar consulta"
-            }
-        }
+class HealthCheck(BaseModel):
+    """Modelo para health check"""
+    status: str = Field(..., description="Status do serviço")
+    timestamp: datetime = Field(default_factory=datetime.now, description="Timestamp")
+    version: str = Field(..., description="Versão do serviço")
+    uptime: Optional[float] = Field(None, description="Tempo de atividade em segundos")
+    dependencies: Optional[Dict[str, str]] = Field(None, description="Status das dependências")

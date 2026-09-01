@@ -104,7 +104,7 @@ def format_date(date_input: Union[str, datetime]) -> str:
         else:
             return str(date_input)
             
-    except Exception:
+    except (ValueError, TypeError, AttributeError):
         return "Data inválida"
 
 def parse_date(date_str: str) -> Optional[str]:
@@ -141,7 +141,7 @@ def parse_date(date_str: str) -> Optional[str]:
         
         return None
         
-    except Exception:
+    except (ValueError, TypeError, AttributeError):
         return None
 
 
@@ -176,7 +176,7 @@ def format_competency(competency: str) -> str:
         
         return competency
         
-    except Exception:
+    except (ValueError, TypeError, AttributeError):
         return competency
 
 def parse_competency(competency: str) -> Optional[str]:
@@ -220,5 +220,5 @@ def parse_competency(competency: str) -> Optional[str]:
         
         return None
         
-    except Exception:
+    except (ValueError, TypeError, AttributeError):
         return None

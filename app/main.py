@@ -1,260 +1,179 @@
-"""
-Aplicação principal do chatbot de folha de pagamento
-FastAPI com endpoints para chat, health check e documentação
-"""
+"""API FastAPI do chatbot de folha de pagamento."""
 import logging
-from fastapi import FastAPI, HTTPException, Depends
+import os
+from contextlib import asynccontextmanager
+from datetime import datetime, timezone
+
+from fastapi import Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from contextlib import asynccontextmanager
-from datetime import datetime
 
 from .core.agent import PayrollAgent
 from .utils.models import ChatRequest, ChatResponse, HealthCheck
 
-# Configuração de logging
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO").upper())
 logger = logging.getLogger(__name__)
 
-# Instância global do agente
-agent = None
+_state: dict = {"agent": None}
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Gerencia o ciclo de vida da aplicação"""
-    global agent
-    
-    # Inicialização
-    logger.info("Inicializando chatbot de folha de pagamento...")
-    agent = PayrollAgent()
-    logger.info("Agente inicializado com sucesso")
-    
+    logger.info("Inicializando o chatbot de folha de pagamento...")
+    _state["agent"] = PayrollAgent()
+    logger.info("Agente pronto.")
     yield
-    
-    # Limpeza
-    logger.info("Finalizando aplicação...")
+    agent = _state.get("agent")
     if agent:
         agent.cleanup_sessions()
-    logger.info("Aplicação finalizada")
+    logger.info("Aplicação finalizada.")
 
-# Criação da aplicação FastAPI
+
 app = FastAPI(
     title="Chatbot de Folha de Pagamento",
-    description="Chatbot inteligente para consultas sobre folha de pagamento com RAG e busca na web",
+    description="Consultas de folha de pagamento com RAG, busca web e memória de conversa.",
     version="1.0.0",
-    lifespan=lifespan
+    lifespan=lifespan,
 )
 
-# Configuração de CORS
+_allowed_origins = [
+    origin.strip()
+    for origin in os.getenv(
+        "ALLOWED_ORIGINS", "http://localhost:3000,http://localhost:5173"
+    ).split(",")
+    if origin.strip()
+]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=_allowed_origins,
     allow_credentials=True,
-    allow_methods=["*"],
+    allow_methods=["GET", "POST", "DELETE"],
     allow_headers=["*"],
 )
 
+
 def get_agent() -> PayrollAgent:
-    """Dependency para obter o agente"""
+    agent = _state.get("agent")
     if agent is None:
         raise HTTPException(status_code=503, detail="Agente não inicializado")
     return agent
 
-@app.get("/", response_model=dict)
+
+@app.get("/")
 async def root():
-    """Endpoint raiz"""
-    return {
-        "message": "Chatbot de Folha de Pagamento API",
-        "version": "1.0.0",
-        "status": "running",
-        "timestamp": datetime.now().isoformat()
-    }
+    return {"message": "Chatbot de Folha de Pagamento API", "version": "1.0.0", "status": "running"}
+
 
 @app.get("/health", response_model=HealthCheck)
 async def health_check(agent: PayrollAgent = Depends(get_agent)):
-    """Health check detalhado"""
+    agent.rag._ensure_loaded()
+    dependencies = {
+        "rag": "ok" if not agent.rag.df.empty else "sem dados",
+        "llm": "ok" if agent.llm.api_key else "sem OPENAI_API_KEY",
+        "web_search": "google" if not agent.web_search.use_fallback else "referencia-local",
+        "memory": f"{len(agent.memory.sessions)} sessao(oes)",
+    }
+    healthy = dependencies["rag"] == "ok" and dependencies["llm"] == "ok"
+    return HealthCheck(
+        status="healthy" if healthy else "degraded",
+        version="1.0.0",
+        dependencies=dependencies,
+    )
+
+
+async def _run_chat(agent: PayrollAgent, message: str, session_id: "str | None") -> ChatResponse:
     try:
-        # Verifica status do agente
-        stats = agent.get_session_stats()
-        
-        # Verifica dependências
-        dependencies = {
-            "rag_system": "ok",
-            "web_search": "ok",
-            "llm": "ok",
-            "memory": "ok"
-        }
-        
-        return HealthCheck(
-            status="healthy",
-            timestamp=datetime.now(),
-            version="1.0.0",
-            uptime=None,
-            dependencies=dependencies
-        )
-        
-    except Exception as e:
-        logger.error(f"Erro no health check: {e}")
-        return HealthCheck(
-            status="unhealthy",
-            timestamp=datetime.now(),
-            version="1.0.0",
-            uptime=None,
-            dependencies={"error": str(e)}
-        )
+        result = await agent.process_query(message, session_id)
+    except Exception as exc:  # noqa: BLE001 - registrado e traduzido para 500 genérico
+        logger.exception("Erro no /chat: %s", exc)
+        raise HTTPException(status_code=500, detail="Erro interno ao processar a mensagem")
+    return ChatResponse(
+        response=result["response"],
+        evidence=result.get("evidence"),
+        tool_used=result["tool_used"],
+        session_id=result.get("session_id"),
+    )
+
 
 @app.post("/chat", response_model=ChatResponse)
 async def chat(request: ChatRequest, agent: PayrollAgent = Depends(get_agent)):
-    """
-    Endpoint principal para chat
-    
-    Processa mensagens do usuário e retorna respostas do chatbot
-    com evidências e citação de fontes.
-    """
-    try:
-        # Processa consulta
-        result = await agent.process_query(request.message)
-        
-        # Cria resposta
-        response = ChatResponse(
-            response=result["response"],
-            evidence=result.get("evidence"),
-            tool_used=result["tool_used"]
-        )
-        
-        return response
-        
-    except Exception as e:
-        logger.error(f"Erro no chat: {e}")
-        raise HTTPException(
-            status_code=500, 
-            detail=f"Erro interno: {str(e)}"
-        )
+    return await _run_chat(agent, request.message, request.session_id)
+
 
 @app.post("/chat/{session_id}", response_model=ChatResponse)
 async def chat_with_session(
-    session_id: str, 
-    request: ChatRequest, 
-    agent: PayrollAgent = Depends(get_agent)
+    session_id: str, request: ChatRequest, agent: PayrollAgent = Depends(get_agent)
 ):
-    """
-    Endpoint para chat com sessão específica
-    
-    Permite manter contexto entre múltiplas mensagens.
-    """
-    try:
-        # Processa consulta com sessão
-        result = await agent.process_query(request.message, session_id)
-        
-        # Cria resposta
-        response = ChatResponse(
-            response=result["response"],
-            evidence=result.get("evidence"),
-            tool_used=result["tool_used"]
-        )
-        
-        return response
-        
-    except Exception as e:
-        logger.error(f"Erro no chat com sessão: {e}")
-        raise HTTPException(
-            status_code=500, 
-            detail=f"Erro interno: {str(e)}"
-        )
+    return await _run_chat(agent, request.message, session_id)
+
 
 @app.get("/sessions/{session_id}/context")
-async def get_session_context(session_id: str, agent: PayrollAgent = Depends(get_agent)):
-    """Obtém contexto de uma sessão específica"""
-    try:
-        context = agent.get_context_summary(session_id)
-        return context
-        
-    except Exception as e:
-        logger.error(f"Erro ao obter contexto: {e}")
-        raise HTTPException(
-            status_code=500, 
-            detail=f"Erro interno: {str(e)}"
-        )
+async def session_context(session_id: str, agent: PayrollAgent = Depends(get_agent)):
+    return agent.get_context_summary(session_id)
+
 
 @app.get("/sessions/stats")
-async def get_sessions_stats(agent: PayrollAgent = Depends(get_agent)):
-    """Obtém estatísticas das sessões"""
-    try:
-        stats = agent.get_session_stats()
-        return stats
-        
-    except Exception as e:
-        logger.error(f"Erro ao obter estatísticas: {e}")
-        raise HTTPException(
-            status_code=500, 
-            detail=f"Erro interno: {str(e)}"
-        )
+async def sessions_stats(agent: PayrollAgent = Depends(get_agent)):
+    return agent.get_session_stats()
+
 
 @app.delete("/sessions/{session_id}")
 async def delete_session(session_id: str, agent: PayrollAgent = Depends(get_agent)):
-    """Remove uma sessão específica"""
-    try:
-        # Implementar remoção de sessão se necessário
-        return {"message": f"Sessão {session_id} removida com sucesso"}
-        
-    except Exception as e:
-        logger.error(f"Erro ao remover sessão: {e}")
-        raise HTTPException(
-            status_code=500, 
-            detail=f"Erro interno: {str(e)}"
-        )
+    if not agent.delete_session(session_id):
+        raise HTTPException(status_code=404, detail="Sessão não encontrada")
+    return {"message": f"Sessão {session_id} removida"}
+
 
 @app.get("/examples")
-async def get_examples():
-    """Retorna exemplos de consultas"""
+async def examples():
     return {
-        "rag_examples": [
-            "Qual é o salário do Ana Souza?",
-            "Quanto recebi em maio/2025? (Ana Souza)",
+        "rag": [
+            "Quanto recebi (líquido) em maio/2025? (Ana Souza)",
             "Qual o total líquido de Ana Souza no 1º trimestre de 2025?",
-            "Qual foi o desconto de INSS do Bruno em junho/2025?",
+            "Qual foi o desconto de INSS do Bruno em jun/2025?",
             "Quando foi pago o salário de abril/2025 do Bruno e qual o líquido?",
-            "Qual foi o maior bônus do Bruno e em que mês?"
+            "Qual foi o maior bônus do Bruno e em que mês?",
         ],
-        "web_examples": [
+        "web": [
             "Traga a taxa Selic atual e cite a fonte",
             "Como calcular férias proporcionais?",
-            "Qual é o valor do FGTS?",
             "Como funciona o 13º salário?",
-            "Quais são os direitos trabalhistas?"
         ],
-        "general_examples": [
-            "Olá, como você está?",
-            "Obrigado pela ajuda",
-            "Preciso de mais informações"
-        ]
+        "geral": ["Olá, tudo bem?", "Obrigado pela ajuda"],
     }
 
+
 @app.exception_handler(HTTPException)
-async def http_exception_handler(request, exc):
-    """Handler para exceções HTTP"""
+async def http_exception_handler(request, exc: HTTPException):
     return JSONResponse(
         status_code=exc.status_code,
         content={
             "error": exc.detail,
             "status_code": exc.status_code,
-            "timestamp": datetime.now().isoformat()
-        }
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        },
     )
 
+
 @app.exception_handler(Exception)
-async def general_exception_handler(request, exc):
-    """Handler para exceções gerais"""
-    logger.error(f"Erro não tratado: {exc}")
+async def unhandled_exception_handler(request, exc: Exception):
+    logger.exception("Erro não tratado: %s", exc)
     return JSONResponse(
         status_code=500,
         content={
             "error": "Erro interno do servidor",
             "status_code": 500,
-            "timestamp": datetime.now().isoformat()
-        }
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        },
     )
+
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+
+    uvicorn.run(
+        "app.main:app",
+        host=os.getenv("HOST", "127.0.0.1"),
+        port=int(os.getenv("PORT", "8000")),
+        reload=True,
+    )

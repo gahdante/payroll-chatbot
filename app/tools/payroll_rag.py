@@ -1,364 +1,334 @@
+"""RAG de folha de pagamento.
+
+Consultas determinísticas sobre o CSV da folha. A camada de LLM (no agente)
+não altera os números produzidos aqui: valores, datas e fontes saem prontos.
 """
-Sistema RAG para consultas de folha de pagamento
-"""
-import pandas as pd
+from __future__ import annotations
+
 import logging
-from typing import Dict, Any, Optional, List
-from datetime import datetime
 import re
+from pathlib import Path
+from typing import Any, Dict, List, Optional
+
+import pandas as pd
+
+from ..utils.formatting import format_competency, format_currency, format_date
 
 logger = logging.getLogger(__name__)
 
+_DEFAULT_CSV = Path(__file__).resolve().parents[2] / "data" / "payroll.csv"
+
+_MONTHS = {
+    "janeiro": 1, "fevereiro": 2, "marco": 3, "março": 3, "abril": 4,
+    "maio": 5, "junho": 6, "julho": 7, "agosto": 8, "setembro": 9,
+    "outubro": 10, "novembro": 11, "dezembro": 12,
+    "jan": 1, "fev": 2, "mar": 3, "abr": 4, "mai": 5, "jun": 6,
+    "jul": 7, "ago": 8, "set": 9, "out": 10, "nov": 11, "dez": 12,
+}
+_MONTH_RE = re.compile(
+    r"\b(jan(?:eiro)?|fev(?:ereiro)?|mar(?:ço|co)?|abr(?:il)?|mai(?:o)?|"
+    r"jun(?:ho)?|jul(?:ho)?|ago(?:sto)?|set(?:embro)?|out(?:ubro)?|"
+    r"nov(?:embro)?|dez(?:embro)?)\b\.?",
+    re.IGNORECASE,
+)
+_ORDINALS = {
+    "primeiro": 1, "segundo": 2, "terceiro": 3, "quarto": 4,
+    "1": 1, "2": 2, "3": 3, "4": 4,
+}
+_AGGREGATE_WORDS = ("total", "soma", "somar", "média", "media", "médio", "medio")
+
+
 class PayrollRAG:
-    """Sistema RAG para consultas de folha de pagamento"""
-    
-    def __init__(self, csv_path: str = "data/payroll.csv"):
-        self.csv_path = csv_path
+    """Consultas sobre a folha de pagamento a partir de um CSV."""
+
+    def __init__(self, csv_path: "str | Path | None" = None) -> None:
+        self.csv_path = Path(csv_path) if csv_path else _DEFAULT_CSV
         self.df = pd.DataFrame()
-        self.month_mapping = {
-            'janeiro': '01', 'jan': '01', 'jan.': '01',
-            'fevereiro': '02', 'fev': '02', 'fev.': '02',
-            'março': '03', 'mar': '03', 'mar.': '03',
-            'abril': '04', 'abr': '04', 'abr.': '04',
-            'maio': '05', 'mai': '05', 'mai.': '05',
-            'junho': '06', 'jun': '06', 'jun.': '06',
-            'julho': '07', 'jul': '07', 'jul.': '07',
-            'agosto': '08', 'ago': '08', 'ago.': '08',
-            'setembro': '09', 'set': '09', 'set.': '09',
-            'outubro': '10', 'out': '10', 'out.': '10',
-            'novembro': '11', 'nov': '11', 'nov.': '11',
-            'dezembro': '12', 'dez': '12', 'dez.': '12'
-        }
-    
-    def _load_data(self):
-        """Carrega os dados do CSV"""
+        self._name_lookup: Dict[str, str] = {}
+        self._ensure_loaded()
+
+    # ----------------------------------------------------------------- loading
+    def _ensure_loaded(self) -> None:
+        if not self.df.empty:
+            return
         try:
-            self.df = pd.read_csv(self.csv_path)
-            logger.info(f"Dados carregados: {len(self.df)} registros")
-        except Exception as e:
-            logger.error(f"Erro ao carregar dados: {e}")
+            df = pd.read_csv(self.csv_path)
+            df["competency"] = df["competency"].astype(str)
+            df["payment_date"] = df["payment_date"].astype(str)
+            self.df = df
+            self._build_name_lookup()
+            logger.info("Folha carregada: %d registros de %s", len(df), self.csv_path)
+        except Exception as exc:  # pragma: no cover - depende de I/O
+            logger.error("Falha ao carregar %s: %s", self.csv_path, exc)
             self.df = pd.DataFrame()
-    
-    def _parse_date_variations(self, date_str: str) -> Optional[str]:
-        """Converte variações de data para formato YYYY-MM"""
-        if not date_str:
-            return None
-        
-        date_str = date_str.lower().strip()
-        
-        # Formato: maio/2025, maio 2025
-        for month_name, month_num in self.month_mapping.items():
-            if month_name in date_str:
-                year_match = re.search(r'(\d{4})', date_str)
-                if year_match:
-                    year = year_match.group(1)
-                    return f"{year}-{month_num}"
-        
-        # Formato: 2025-05, 05/2025
-        if re.match(r'\d{4}-\d{2}', date_str):
-            return date_str
-        if re.match(r'\d{2}/\d{4}', date_str):
-            parts = date_str.split('/')
-            return f"{parts[1]}-{parts[0]}"
-        
-        return None
-    
+
+    def _build_name_lookup(self) -> None:
+        lookup: Dict[str, str] = {}
+        for full in self.df["name"].dropna().unique():
+            full = str(full)
+            parts = full.split()
+            lookup[full.lower()] = full
+            if parts:
+                lookup.setdefault(parts[0].lower(), full)
+                lookup.setdefault(parts[-1].lower(), full)
+        self._name_lookup = lookup
+
+    def known_names(self) -> List[str]:
+        self._ensure_loaded()
+        if self.df.empty:
+            return []
+        return sorted(self.df["name"].dropna().unique().tolist())
+
+    def _default_year(self) -> int:
+        if self.df.empty:
+            return 2025
+        return int(self.df["competency"].str.slice(0, 4).astype(int).max())
+
+    # -------------------------------------------------------------- extraction
     def _extract_employee_name(self, query: str) -> Optional[str]:
-        """Extrai nome do funcionário da consulta"""
-        # Nomes conhecidos
-        known_names = ['Ana Souza', 'Bruno Lima']
-        
-        for name in known_names:
-            if name.lower() in query.lower():
-                return name
-        
-        # Busca por padrões como "Ana", "Bruno"
-        name_patterns = [
-            r'\b(Ana|Bruno)\b',
-            r'\b(Ana Souza|Bruno Lima)\b'
-        ]
-        
-        for pattern in name_patterns:
-            match = re.search(pattern, query, re.IGNORECASE)
-            if match:
-                found = match.group(1)
-                if found in ['Ana', 'Bruno']:
-                    return 'Ana Souza' if found == 'Ana' else 'Bruno Lima'
-        
+        q = query.lower()
+        for key, full in self._name_lookup.items():
+            if " " in key and key in q:
+                return full
+        for key, full in self._name_lookup.items():
+            if " " not in key and re.search(rf"\b{re.escape(key)}\b", q):
+                return full
         return None
-    
+
     def _extract_competency(self, query: str) -> Optional[str]:
-        """Extrai competência da consulta"""
-        query_lower = query.lower()
-        
-        # Busca por padrões de data
-        date_patterns = [
-            r'\b(\d{4}-\d{2})\b',  # 2025-01
-            r'\b(\d{2}/\d{4})\b',  # 01/2025
-            r'\b(janeiro|fevereiro|março|abril|maio|junho|julho|agosto|setembro|outubro|novembro|dezembro)\s+(\d{4})\b',
-            r'\b(jan|fev|mar|abr|mai|jun|jul|ago|set|out|nov|dez)\.?\s+(\d{4})\b'
-        ]
-        
-        for pattern in date_patterns:
-            match = re.search(pattern, query_lower)
-            if match:
-                if len(match.groups()) == 1:
-                    return self._parse_date_variations(match.group(1))
-                else:
-                    month, year = match.groups()
-                    return self._parse_date_variations(f"{month} {year}")
-        
-        # Busca por meses específicos na query
-        for month_name, month_num in self.month_mapping.items():
-            if month_name in query_lower:
-                # Procura por ano na query
-                year_match = re.search(r'(\d{4})', query_lower)
-                if year_match:
-                    year = year_match.group(1)
-                    return f"{year}-{month_num}"
-        
+        q = query.lower().strip()
+        m = re.search(r"\b(\d{4})-(\d{2})\b", q)
+        if m:
+            return f"{m.group(1)}-{m.group(2)}"
+        m = re.search(r"\b(\d{1,2})/(\d{4})\b", q)
+        if m:
+            return f"{m.group(2)}-{int(m.group(1)):02d}"
+        month_match = _MONTH_RE.search(q)
+        if month_match:
+            token = month_match.group(1).lower().rstrip(".")
+            month = _MONTHS.get(token) or _MONTHS.get(token[:3])
+            year_match = re.search(r"\b(20\d{2})\b", q)
+            if month and year_match:
+                return f"{year_match.group(1)}-{month:02d}"
         return None
-    
-    def _format_currency(self, value: float) -> str:
-        """Formata valor como moeda brasileira"""
-        return f"R$ {value:,.2f}".replace(',', 'X').replace('.', ',').replace('X', '.')
-    
-    def _format_date(self, date_str: str) -> str:
-        """Formata data para formato brasileiro"""
-        try:
-            date_obj = datetime.strptime(date_str, '%Y-%m-%d')
-            return date_obj.strftime('%d/%m/%Y')
-        except:
-            return date_str
-    
-    def _create_evidence(self, filtered_df: pd.DataFrame) -> List[Dict[str, Any]]:
-        """Cria evidências das consultas"""
-        evidence = []
-        
-        for _, record in filtered_df.iterrows():
-            evidence.append({
-                "source": "payroll_data",
-                "content": f"Funcionário: {record['name']}, Competência: {record['competency']}, Salário Líquido: {self._format_currency(record['net_pay'])}",
-                "metadata": {
-                    "employee_id": record['employee_id'],
-                    "competency": record['competency'],
-                    "net_pay": record['net_pay']
-                }
+
+    def _extract_period(self, query: str) -> Optional[List[str]]:
+        q = query.lower()
+        match = re.search(
+            r"(primeiro|segundo|terceiro|quarto|[1-4])\s*[ºo°.]*\s*(trimestre|semestre)", q
+        )
+        if match:
+            n = _ORDINALS.get(match.group(1), 1)
+            kind = match.group(2)
+        elif "trimestre" in q:
+            n, kind = 1, "trimestre"
+        elif "semestre" in q:
+            n, kind = 1, "semestre"
+        else:
+            return None
+
+        year_match = re.search(r"\b(20\d{2})\b", q)
+        year = int(year_match.group(1)) if year_match else self._default_year()
+        if kind == "trimestre":
+            start = (n - 1) * 3 + 1
+            months = range(start, start + 3)
+        else:
+            months = range(1, 7) if n == 1 else range(7, 13)
+        return [f"{year}-{month:02d}" for month in months]
+
+    @staticmethod
+    def _detect_metric(query: str) -> str:
+        q = query.lower()
+        if "inss" in q:
+            return "inss"
+        if "irrf" in q or "imposto de renda" in q:
+            return "irrf"
+        if "bônus" in q or "bonus" in q:
+            return "bonus"
+        if "quando" in q or "foi pago" in q or "data de pagamento" in q or "data do pagamento" in q:
+            return "payment_date"
+        if "salário base" in q or "salario base" in q:
+            return "base_salary"
+        return "net_pay"
+
+    @staticmethod
+    def _period_label(competencies: Optional[List[str]]) -> str:
+        if not competencies:
+            return "todo o período disponível"
+        months = sorted(competencies)
+        year = months[0][:4]
+        idx = {m[5:7] for m in months}
+        quarters = {
+            frozenset({"01", "02", "03"}): "1º trimestre",
+            frozenset({"04", "05", "06"}): "2º trimestre",
+            frozenset({"07", "08", "09"}): "3º trimestre",
+            frozenset({"10", "11", "12"}): "4º trimestre",
+            frozenset({"01", "02", "03", "04", "05", "06"}): "1º semestre",
+            frozenset({"07", "08", "09", "10", "11", "12"}): "2º semestre",
+        }
+        label = quarters.get(frozenset(idx))
+        if label:
+            return f"{label} de {year}"
+        return f"{months[0]} a {months[-1]}"
+
+    # ------------------------------------------------------------------ output
+    def _build_evidence(self, rows: pd.DataFrame, query_type: str) -> Dict[str, Any]:
+        sources = []
+        for _, r in rows.iterrows():
+            sources.append({
+                "employee_id": str(r["employee_id"]),
+                "name": str(r["name"]),
+                "competency": str(r["competency"]),
+                "payment_date": str(r["payment_date"]),
+                "base_salary": float(r["base_salary"]),
+                "bonus": float(r["bonus"]),
+                "deductions_inss": float(r["deductions_inss"]),
+                "deductions_irrf": float(r["deductions_irrf"]),
+                "net_pay": float(r["net_pay"]),
             })
-        
-        return evidence
-    
-    def _determine_query_type(self, query: str) -> str:
-        """Determina o tipo de consulta"""
-        query_lower = query.lower()
-        
-        # Consulta por funcionário específico
-        if any(name in query_lower for name in ['ana', 'bruno', 'souza', 'lima']):
-            return "specific_employee"
-        
-        # Consulta agregada
-        if any(word in query_lower for word in ['total', 'média', 'médio', 'soma', 'somar', 'trimestre', 'semestre']):
-            return "aggregate"
-        
-        # Consulta por competência específica
-        if any(word in query_lower for word in ['maio', 'junho', 'julho', 'agosto', 'setembro', 'outubro', 'novembro', 'dezembro', 'janeiro', 'fevereiro', 'março', 'abril']):
-            return "competency"
-        
-        return "general"
-    
-    async def _query_specific_employee(self, query: str) -> Dict[str, Any]:
-        """Consulta por funcionário específico"""
-        employee_name = self._extract_employee_name(query)
-        competency = self._extract_competency(query)
-        
-        if not employee_name:
-            return {
-                "success": False,
-                "data": "Nome do funcionário não encontrado na consulta",
-                "evidence": None
-            }
-        
-        # Filtra por funcionário
-        filtered = self.df[self.df['name'].str.contains(employee_name, case=False, na=False)]
-        
-        if competency:
-            filtered = filtered[filtered['competency'] == competency]
-        
-        if filtered.empty:
-            return {
-                "success": False,
-                "data": f"Nenhum registro encontrado para {employee_name}",
-                "evidence": None
-            }
-        
-        # Monta resposta
-        response_parts = []
-        
-        if competency:
-            # Consulta específica por competência
-            if not filtered.empty:
-                record = filtered.iloc[0]
-                
-                # Verifica se é consulta sobre INSS
-                if 'inss' in query.lower():
-                    response_parts.append(
-                        f"Desconto de INSS de {employee_name} em {competency}: {self._format_currency(record['deductions_inss'])}"
-                    )
-                # Verifica se é consulta sobre bônus
-                elif 'bônus' in query.lower() or 'bonus' in query.lower():
-                    response_parts.append(
-                        f"Bônus de {employee_name} em {competency}: {self._format_currency(record['bonus'])}"
-                    )
-                # Verifica se é consulta sobre data de pagamento
-                elif 'quando' in query.lower() or 'data' in query.lower():
-                    payment_date = self._format_date(record['payment_date'])
-                    response_parts.append(
-                        f"Salário de {employee_name} em {competency}: {self._format_currency(record['net_pay'])} (pago em {payment_date})"
-                    )
-                else:
-                    response_parts.append(
-                        f"{employee_name} recebeu {self._format_currency(record['net_pay'])} em {competency}"
-                    )
-            else:
-                response_parts.append(
-                    f"Nenhum registro encontrado para {employee_name} em {competency}"
-                )
-        else:
-            # Consulta geral do funcionário
-            if 'maior' in query.lower() and ('bônus' in query.lower() or 'bonus' in query.lower()):
-                # Encontra o maior bônus
-                max_bonus_idx = filtered['bonus'].idxmax()
-                record = filtered.loc[max_bonus_idx]
-                response_parts.append(
-                    f"Maior bônus de {employee_name}: {self._format_currency(record['bonus'])} em {record['competency']}"
-                )
-            else:
-                for _, record in filtered.iterrows():
-                    response_parts.append(
-                        f"{record['name']} - {record['competency']}: {self._format_currency(record['net_pay'])}"
-                    )
-        
-        evidence = self._create_evidence(filtered)
-        
         return {
-            "success": True,
-            "data": "\n".join(response_parts),
-            "evidence": evidence
+            "sources": sources,
+            "employee_ids": sorted({s["employee_id"] for s in sources}),
+            "competencies": sorted({s["competency"] for s in sources}),
+            "total_records": len(sources),
+            "query_type": query_type,
         }
-    
-    async def _query_aggregate(self, query: str) -> Dict[str, Any]:
-        """Consulta agregada (total, média, trimestre)"""
-        query_lower = query.lower()
-        
-        # Determina período
-        if 'trimestre' in query_lower:
-            months = ['2025-01', '2025-02', '2025-03']  # 1º trimestre
-        elif 'semestre' in query_lower:
-            months = ['2025-01', '2025-02', '2025-03', '2025-04', '2025-05', '2025-06']
-        else:
-            months = None
-        
-        # Filtra dados
-        if months:
-            filtered = self.df[self.df['competency'].isin(months)]
-        else:
-            filtered = self.df
-        
-        if filtered.empty:
-            return {
-                "success": False,
-                "data": "Nenhum dado encontrado para o período solicitado",
-                "evidence": None
-            }
-        
-        # Calcula totais
-        total_net = filtered['net_pay'].sum()
-        avg_net = filtered['net_pay'].mean()
-        count = len(filtered)
-        
-        # Monta resposta
-        response = f"Total: {self._format_currency(total_net)}"
-        response += f" | Média: {self._format_currency(avg_net)}"
-        response += f" | Registros: {count}"
-        
-        if months:
-            response += f" - {len(months)}º trimestre 2025"
-        
-        evidence = self._create_evidence(filtered)
-        
-        return {
-            "success": True,
-            "data": response,
-            "evidence": evidence
-        }
-    
-    async def _query_competency(self, query: str) -> Dict[str, Any]:
-        """Consulta por competência específica"""
-        competency = self._extract_competency(query)
-        
-        if not competency:
-            return {
-                "success": False,
-                "data": "Competência não identificada na consulta",
-                "evidence": None
-            }
-        
-        # Filtra por competência
-        filtered = self.df[self.df['competency'] == competency]
-        
-        if filtered.empty:
-            return {
-                "success": False,
-                "data": f"Nenhum registro encontrado para {competency}",
-                "evidence": None
-            }
-        
-        # Monta resposta
-        response_parts = []
-        for _, record in filtered.iterrows():
-            response_parts.append(
-                f"{record['name']}: {self._format_currency(record['net_pay'])}"
-            )
-        
-        response = f"Folha de {competency}:\n" + "\n".join(response_parts)
-        
-        evidence = self._create_evidence(filtered)
-        
-        return {
-            "success": True,
-            "data": response,
-            "evidence": evidence
-        }
-    
+
+    @staticmethod
+    def _fail(message: str) -> Dict[str, Any]:
+        return {"success": False, "data": message, "evidence": None}
+
+    def _rows_for(self, name: str) -> pd.DataFrame:
+        return self.df[self.df["name"].str.lower() == name.lower()]
+
+    # ------------------------------------------------------------------- query
     async def query(self, query: str) -> Dict[str, Any]:
-        """Processa consulta usando RAG"""
         try:
-            # Carrega dados se necessário
+            self._ensure_loaded()
             if self.df.empty:
-                self._load_data()
-            
-            if self.df.empty:
-                return {
-                    "success": False,
-                    "data": "Erro ao carregar dados da folha de pagamento",
-                    "evidence": None
-                }
-            
-            # Determina tipo de consulta
-            query_type = self._determine_query_type(query)
-            
-            # Processa consulta
-            if query_type == "specific_employee":
-                return await self._query_specific_employee(query)
-            elif query_type == "aggregate":
-                return await self._query_aggregate(query)
-            else:
-                return await self._query_competency(query)
-                
-        except Exception as e:
-            logger.error(f"Erro ao processar consulta: {e}")
-            return {
-                "success": False,
-                "data": f"Erro interno: {str(e)}",
-                "evidence": None
-            }
+                return self._fail("Não consegui carregar os dados da folha de pagamento.")
+            if not query or not query.strip():
+                return self._fail("Consulta vazia. Diga o que você quer saber sobre a folha.")
+
+            name = self._extract_employee_name(query)
+            period = self._extract_period(query)
+            competency = self._extract_competency(query)
+            metric = self._detect_metric(query)
+            q = query.lower()
+            wants_total = any(w in q for w in _AGGREGATE_WORDS) or period is not None
+            wants_extreme = "maior" in q or "menor" in q
+
+            if name and wants_extreme and metric == "bonus":
+                return self._answer_extreme_bonus(name, is_max="maior" in q)
+            if name and wants_total:
+                return self._answer_employee_aggregate(name, period)
+            if name and competency:
+                return self._answer_single_record(name, competency, metric)
+            if name:
+                return self._answer_employee_listing(name)
+            if wants_total:
+                return self._answer_global_aggregate(period)
+            if competency:
+                return self._answer_competency(competency)
+            return self._fail(
+                "Funcionário não encontrado e competência não identificada na consulta. "
+                'Tente, por exemplo: "líquido de Ana Souza em maio/2025".'
+            )
+        except Exception as exc:
+            logger.error("Erro ao processar consulta RAG: %s", exc)
+            return self._fail(f"Erro ao consultar a folha: {exc}")
+
+    def _answer_single_record(self, name: str, competency: str, metric: str) -> Dict[str, Any]:
+        rows = self._rows_for(name)
+        rows = rows[rows["competency"] == competency]
+        if rows.empty:
+            return self._fail(
+                f"Nenhum registro encontrado para {name} em {format_competency(competency)}."
+            )
+        r = rows.iloc[0]
+        lines = [f"{name} — {format_competency(competency)} ({competency}):"]
+        if metric == "inss":
+            lines.append(f"• Desconto de INSS: {format_currency(r['deductions_inss'])}")
+        elif metric == "irrf":
+            lines.append(f"• Desconto de IRRF: {format_currency(r['deductions_irrf'])}")
+        elif metric == "bonus":
+            lines.append(f"• Bônus: {format_currency(r['bonus'])}")
+        elif metric == "base_salary":
+            lines.append(f"• Salário base: {format_currency(r['base_salary'])}")
+        lines.append(f"• Salário líquido: {format_currency(r['net_pay'])}")
+        lines.append(f"• Data de pagamento: {format_date(str(r['payment_date']))}")
+        return {"success": True, "data": "\n".join(lines),
+                "evidence": self._build_evidence(rows, "single_record")}
+
+    def _answer_employee_aggregate(self, name: str, period: Optional[List[str]]) -> Dict[str, Any]:
+        rows = self._rows_for(name)
+        if period:
+            rows = rows[rows["competency"].isin(period)]
+        if rows.empty:
+            return self._fail(f"Nenhum registro encontrado para {name} no período solicitado.")
+        comps = sorted(rows["competency"].tolist())
+        data = (
+            f"{name} — {self._period_label(comps)}:\n"
+            f"• Total líquido: {format_currency(rows['net_pay'].sum())}\n"
+            f"• Média mensal: {format_currency(rows['net_pay'].mean())}\n"
+            f"• Meses considerados: {len(comps)} ({', '.join(comps)})"
+        )
+        return {"success": True, "data": data,
+                "evidence": self._build_evidence(rows, "employee_aggregate")}
+
+    def _answer_employee_listing(self, name: str) -> Dict[str, Any]:
+        rows = self._rows_for(name).sort_values("competency")
+        if rows.empty:
+            return self._fail(f"Nenhum registro encontrado para {name}.")
+        lines = [f"Registros de {name}:"]
+        for _, r in rows.iterrows():
+            lines.append(
+                f"• {format_competency(str(r['competency']))}: "
+                f"líquido {format_currency(r['net_pay'])}"
+            )
+        return {"success": True, "data": "\n".join(lines),
+                "evidence": self._build_evidence(rows, "employee_listing")}
+
+    def _answer_extreme_bonus(self, name: str, is_max: bool) -> Dict[str, Any]:
+        rows = self._rows_for(name)
+        if rows.empty:
+            return self._fail(f"Nenhum registro encontrado para {name}.")
+        idx = rows["bonus"].idxmax() if is_max else rows["bonus"].idxmin()
+        row = rows.loc[[idx]]
+        rec = row.iloc[0]
+        comp = str(rec["competency"])
+        palavra = "maior" if is_max else "menor"
+        data = (
+            f"O {palavra} bônus de {name} foi de {format_currency(rec['bonus'])}, "
+            f"na competência {format_competency(comp)} ({comp})."
+        )
+        return {"success": True, "data": data,
+                "evidence": self._build_evidence(row, "extreme_bonus")}
+
+    def _answer_global_aggregate(self, period: Optional[List[str]]) -> Dict[str, Any]:
+        rows = self.df
+        if period:
+            rows = rows[rows["competency"].isin(period)]
+        if rows.empty:
+            return self._fail("Nenhum dado encontrado para o período solicitado.")
+        label = self._period_label(sorted(rows["competency"].unique().tolist()) if period else None)
+        data = (
+            f"{label.capitalize()}:\n"
+            f"• Total líquido (todos os funcionários): {format_currency(rows['net_pay'].sum())}\n"
+            f"• Média por registro: {format_currency(rows['net_pay'].mean())}\n"
+            f"• Registros: {len(rows)}"
+        )
+        return {"success": True, "data": data,
+                "evidence": self._build_evidence(rows, "global_aggregate")}
+
+    def _answer_competency(self, competency: str) -> Dict[str, Any]:
+        rows = self.df[self.df["competency"] == competency].sort_values("name")
+        if rows.empty:
+            return self._fail(
+                f"Nenhum registro encontrado para {format_competency(competency)} ({competency})."
+            )
+        lines = [f"Folha de {format_competency(competency)}:"]
+        for _, r in rows.iterrows():
+            lines.append(f"• {r['name']}: líquido {format_currency(r['net_pay'])}")
+        return {"success": True, "data": "\n".join(lines),
+                "evidence": self._build_evidence(rows, "competency")}

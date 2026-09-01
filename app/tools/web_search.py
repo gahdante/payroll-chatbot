@@ -1,224 +1,145 @@
+"""Busca na web para dúvidas de legislação trabalhista.
+
+Usa a Google Custom Search API quando ``GOOGLE_API_KEY`` e
+``GOOGLE_SEARCH_ENGINE_ID`` estão configurados. Sem essas chaves, cai em uma
+base de referência local — e a resposta sinaliza claramente que o dado pode
+estar desatualizado.
 """
-Sistema de busca na web para consultas de legislação trabalhista
-"""
-import os
-import requests
 import logging
-from typing import Dict, Any, List
+import os
+from typing import Any, Dict, List
+
+import httpx
 
 logger = logging.getLogger(__name__)
 
+_FALLBACK_NOTE = (
+    "Resposta baseada em uma base de referência local e que pode estar desatualizada. "
+    "Confirme na fonte oficial citada. Para busca web ao vivo, configure "
+    "GOOGLE_API_KEY e GOOGLE_SEARCH_ENGINE_ID."
+)
+
+_CLT_ENTRY = {
+    "title": "Consolidação das Leis do Trabalho (CLT)",
+    "url": "https://www.planalto.gov.br/ccivil_03/decreto-lei/del5452.htm",
+    "snippet": "A CLT (Decreto-Lei 5.452/1943) reúne as normas que regulam as relações de trabalho no Brasil.",
+    "reference": "Decreto-Lei nº 5.452/1943",
+}
+
+_REFERENCE = [
+    (("selic", "taxa básica", "taxa basica", "taxa de juros"), {
+        "title": "Taxa Selic — Banco Central do Brasil",
+        "url": "https://www.bcb.gov.br/controleinflacao/taxaselic",
+        "snippet": "A Selic é a taxa básica de juros da economia brasileira, definida pelo Copom.",
+        "reference": "Banco Central do Brasil (Copom)",
+        "detail": "O valor vigente muda a cada reunião do Copom; consulte o site do BC para a taxa atual.",
+    }),
+    (("férias", "ferias"), {
+        "title": "Férias — CLT, arts. 129 a 145",
+        "url": "https://www.planalto.gov.br/ccivil_03/decreto-lei/del5452.htm",
+        "snippet": "Férias proporcionais correspondem a 1/12 por mês trabalhado (ou fração superior a 14 dias).",
+        "reference": "CLT, arts. 130 e 146",
+        "detail": "Sobre a remuneração de férias incide o adicional de 1/3 (CF, art. 7º, XVII).",
+    }),
+    (("fgts", "fundo de garantia"), {
+        "title": "FGTS — Fundo de Garantia do Tempo de Serviço",
+        "url": "https://www.gov.br/fgts",
+        "snippet": "O empregador deposita mensalmente 8% da remuneração do empregado em conta vinculada do FGTS.",
+        "reference": "Lei nº 8.036/1990",
+        "detail": "No contrato de aprendizagem a alíquota é de 2%.",
+    }),
+    (("inss", "previdência", "previdencia", "contribuição previdenciária"), {
+        "title": "Contribuição ao INSS — tabela progressiva",
+        "url": "https://www.gov.br/inss",
+        "snippet": "O desconto previdenciário do empregado segue alíquotas progressivas de 7,5% a 14% sobre o salário de contribuição.",
+        "reference": "Lei nº 8.212/1991 e portaria interministerial anual",
+        "detail": "Há um teto do salário de contribuição, reajustado todo ano.",
+    }),
+    (("13º", "13o", "décimo terceiro", "decimo terceiro", "gratificação natalina"), {
+        "title": "13º salário (gratificação natalina)",
+        "url": "https://www.planalto.gov.br/ccivil_03/leis/l4090.htm",
+        "snippet": "O 13º equivale a 1/12 da remuneração por mês trabalhado no ano, pago em duas parcelas.",
+        "reference": "Lei nº 4.090/1962 e Lei nº 4.749/1965",
+        "detail": "A 1ª parcela vai até 30/11 e a 2ª até 20/12.",
+    }),
+]
+
+
 class WebSearch:
-    """Sistema de busca na web para legislação trabalhista"""
-    
-    def __init__(self):
-        """Inicializa o sistema de busca"""
+    """Busca na web (Google CSE) com fallback para base de referência local."""
+
+    GOOGLE_ENDPOINT = "https://www.googleapis.com/customsearch/v1"
+
+    def __init__(self) -> None:
         self.api_key = os.getenv("GOOGLE_API_KEY")
         self.search_engine_id = os.getenv("GOOGLE_SEARCH_ENGINE_ID")
         self.use_fallback = not (self.api_key and self.search_engine_id)
-        
-        # Dados de fallback para demonstração com informações específicas
-        self.fallback_data = {
-            "selic": {
-                "title": "Taxa Selic Atual - Banco Central do Brasil",
-                "url": "https://www.bcb.gov.br/controleinflacao/historicotaxasjuros",
-                "snippet": "A Taxa Selic é a taxa básica de juros da economia brasileira.",
-                "relevance_score": 0.95,
-                "specific_data": {
-                    "taxa_selic": "10,50% ao ano",
-                    "data_atualizacao": "Janeiro 2025",
-                    "fonte": "Banco Central do Brasil"
-                }
-            },
-            "ferias": {
-                "title": "Férias Proporcionais - CLT Art. 130",
-                "url": "https://www.planalto.gov.br/ccivil_03/decreto-lei/del5452.htm",
-                "snippet": "As férias proporcionais são devidas ao empregado que não completou 12 meses de trabalho.",
-                "relevance_score": 0.90,
-                "specific_data": {
-                    "regra": "1/12 avos por mês trabalhado",
-                    "base_calculo": "Salário base + adicionais",
-                    "fonte": "CLT Art. 130"
-                }
-            },
-            "fgts": {
-                "title": "FGTS - Fundo de Garantia do Tempo de Serviço",
-                "url": "https://www.caixa.gov.br/fgts",
-                "snippet": "O FGTS é um fundo de garantia para trabalhadores com carteira assinada.",
-                "relevance_score": 0.90,
-                "specific_data": {
-                    "percentual": "8% sobre o salário",
-                    "deposito": "Mensal pelo empregador",
-                    "fonte": "Lei 5.107/1966"
-                }
-            },
-            "inss": {
-                "title": "INSS - Instituto Nacional do Seguro Social",
-                "url": "https://www.gov.br/inss",
-                "snippet": "O INSS é responsável pelo pagamento de benefícios previdenciários.",
-                "relevance_score": 0.90,
-                "specific_data": {
-                    "aliquotas": "7,5% a 14% (tabela progressiva)",
-                    "teto": "R$ 7.507,49 (2025)",
-                    "fonte": "INSS"
-                }
-            }
-        }
-    
+
     async def search(self, query: str) -> Dict[str, Any]:
-        """Executa busca na web"""
+        if self.use_fallback:
+            return self._reference_search(query)
         try:
-            if self.use_fallback:
-                return await self._fallback_search(query)
-            else:
-                return await self._google_search(query)
-        except Exception as e:
-            logger.error(f"Erro na busca: {e}")
-            return await self._fallback_search(query)
-    
+            return await self._google_search(query)
+        except Exception as exc:
+            logger.warning("Busca Google falhou (%s); usando base de referência.", exc)
+            return self._reference_search(query)
+
     async def _google_search(self, query: str) -> Dict[str, Any]:
-        """Executa busca usando Google Custom Search API"""
-        try:
-            base_url = "https://www.googleapis.com/customsearch/v1"
-            params = {
-                "key": self.api_key,
-                "cx": self.search_engine_id,
-                "q": query,
-                "num": 10,
-                "lr": "lang_pt"
-            }
-            
-            response = requests.get(base_url, params=params, timeout=10)
-            response.raise_for_status()
-            
-            data = response.json()
-            
-            results = []
-            if "items" in data:
-                for item in data["items"]:
-                    result = {
-                        "title": item.get("title", ""),
-                        "url": item.get("link", ""),
-                        "snippet": item.get("snippet", ""),
-                        "date": item.get("pagemap", {}).get("metatags", [{}])[0].get("article:published_time", "")
-                    }
-                    results.append(result)
-            
-            return {
-                "success": True,
-                "results": results[:5],
-                "query": query,
-                "total_results": len(results)
-            }
-            
-        except Exception as e:
-            logger.error(f"Erro na busca Google: {e}")
-            return await self._fallback_search(query)
-    
-    async def _fallback_search(self, query: str) -> Dict[str, Any]:
-        """Busca de fallback com dados pré-definidos"""
-        query_lower = query.lower()
-        
-        # Detecção inteligente de consultas específicas
-        if "selic" in query_lower or "taxa selic" in query_lower or "juros" in query_lower:
-            result = self.fallback_data["selic"]
-        elif "férias" in query_lower or "ferias" in query_lower or "férias proporcionais" in query_lower:
-            result = self.fallback_data["ferias"]
-        elif "fgts" in query_lower or "fundo de garantia" in query_lower:
-            result = self.fallback_data["fgts"]
-        elif "inss" in query_lower or "previdência" in query_lower or "previdencia" in query_lower:
-            result = self.fallback_data["inss"]
-        else:
-            result = {
-                "title": "Legislação Trabalhista - CLT",
-                "url": "https://www.planalto.gov.br/ccivil_03/decreto-lei/del5452.htm",
-                "snippet": "A Consolidação das Leis do Trabalho (CLT) é o conjunto de normas que regulam as relações individuais e coletivas de trabalho no Brasil.",
-                "relevance_score": 0.8,
-                "specific_data": {
-                    "fonte": "CLT - Consolidação das Leis do Trabalho",
-                    "vigencia": "Desde 1943",
-                    "fonte": "Decreto-Lei 5.452/1943"
-                }
-            }
-        
-        return {
-            "success": True,
-            "results": [result],
-            "query": query,
-            "total_results": 1
+        params = {
+            "key": self.api_key,
+            "cx": self.search_engine_id,
+            "q": query,
+            "num": 5,
+            "lr": "lang_pt",
         }
-    
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.get(self.GOOGLE_ENDPOINT, params=params)
+            resp.raise_for_status()
+            payload = resp.json()
+
+        results = [
+            {
+                "title": item.get("title", ""),
+                "url": item.get("link", ""),
+                "snippet": item.get("snippet", ""),
+            }
+            for item in payload.get("items", [])
+        ]
+        return {"success": bool(results), "results": results, "query": query, "fallback": False}
+
+    def _reference_search(self, query: str) -> Dict[str, Any]:
+        q = query.lower()
+        chosen = next((entry for keys, entry in _REFERENCE if any(k in q for k in keys)), _CLT_ENTRY)
+        return {"success": True, "results": [chosen], "query": query, "fallback": True}
+
     async def search_with_citation(self, query: str) -> Dict[str, Any]:
-        """Executa busca com citação de fontes"""
         try:
-            search_result = await self.search(query)
-            
-            if not search_result["success"]:
-                return {
-                    "success": False,
-                    "data": "Não foi possível realizar a busca na web",
-                    "evidence": None
-                }
-            
-            # Monta resposta mais detalhada
-            results = search_result.get("results", [])
-            if not results:
-                return {
-                    "success": False,
-                    "data": "Nenhum resultado encontrado na busca",
-                    "evidence": None
-                }
-            
-            # Pega o primeiro resultado
-            first_result = results[0]
-            
-            # Monta resposta com dados específicos se disponíveis
-            if 'specific_data' in first_result:
-                specific_data = first_result['specific_data']
-                response = f"📊 **Dados Específicos sobre '{query}':**\n\n"
-                
-                # Adiciona dados específicos
-                for key, value in specific_data.items():
-                    if key == 'taxa_selic':
-                        response += f"💰 **Taxa Selic Atual:** {value}\n"
-                    elif key == 'data_atualizacao':
-                        response += f"📅 **Data de Atualização:** {value}\n"
-                    elif key == 'percentual':
-                        response += f"📈 **Percentual:** {value}\n"
-                    elif key == 'aliquotas':
-                        response += f"📊 **Alíquotas:** {value}\n"
-                    elif key == 'teto':
-                        response += f"🎯 **Teto:** {value}\n"
-                    elif key == 'regra':
-                        response += f"📋 **Regra:** {value}\n"
-                    elif key == 'base_calculo':
-                        response += f"🧮 **Base de Cálculo:** {value}\n"
-                    elif key == 'deposito':
-                        response += f"💳 **Depósito:** {value}\n"
-                    elif key == 'fonte':
-                        response += f"📚 **Fonte:** {value}\n"
-                    elif key == 'vigencia':
-                        response += f"⏰ **Vigência:** {value}\n"
-                
-                response += f"\n🔗 **Fonte:** {first_result.get('url', 'URL não disponível')}"
-            else:
-                # Resposta padrão se não há dados específicos
-                response = f"Encontrei informações sobre '{query}':\n\n"
-                response += f"📋 {first_result.get('title', 'Título não disponível')}\n"
-                response += f"🔗 {first_result.get('url', 'URL não disponível')}\n"
-                response += f"📝 {first_result.get('snippet', 'Descrição não disponível')}"
-            
-            return {
-                "success": True,
-                "data": response,
-                "evidence": results,
-                "query": query
-            }
-            
-        except Exception as e:
-            logger.error(f"Erro na busca com citação: {e}")
-            return {
-                "success": False,
-                "data": f"Erro na busca: {str(e)}",
-                "evidence": None
-            }
+            result = await self.search(query)
+        except Exception as exc:
+            logger.error("Erro na busca web: %s", exc)
+            return {"success": False, "data": "Não foi possível realizar a busca na web.", "evidence": None}
+
+        results: List[Dict[str, Any]] = result.get("results", [])
+        if not result.get("success") or not results:
+            return {"success": False, "data": "Nenhum resultado encontrado na busca.", "evidence": None}
+
+        top = results[0]
+        lines = [f'Sobre "{query}":', "", top.get("snippet", "")]
+        if top.get("reference"):
+            lines.append(f"Base legal: {top['reference']}")
+        if top.get("detail"):
+            lines.append(top["detail"])
+        lines += ["", f"Fonte: {top.get('url', 'sem URL')}"]
+        data = "\n".join(line for line in lines if line is not None)
+
+        evidence = {
+            "sources": [
+                {"title": r.get("title", ""), "url": r.get("url", ""), "snippet": r.get("snippet", "")}
+                for r in results
+            ],
+            "query_type": "web",
+        }
+        out: Dict[str, Any] = {"success": True, "data": data, "evidence": evidence}
+        if result.get("fallback"):
+            out["note"] = _FALLBACK_NOTE
+        return out

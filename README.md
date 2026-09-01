@@ -4,12 +4,12 @@ Chatbot inteligente para consultas sobre folha de pagamento com RAG, busca na we
 
 ## 🚀 Funcionalidades
 
-- **Chat com LLM**: OpenAI GPT-4o-mini para conversas gerais
-- **RAG de Folha**: Consultas específicas no dataset CSV
-- **Web Search**: Busca informações de legislação trabalhista
-- **Interface React**: Frontend moderno e responsivo
-- **Memória de Conversa**: Contexto entre turnos
-- **Evidências**: Citação de fontes em todas as respostas
+- **Chat com LLM**: OpenAI (padrão `gpt-4o-mini`) para conversas gerais
+- **RAG de Folha**: consultas determinísticas no CSV (valores e datas nunca são reescritos pelo LLM)
+- **Web Search**: Google Custom Search quando configurado; caso contrário, base de referência local (a resposta avisa que o dado pode estar desatualizado)
+- **Interface React**: frontend responsivo com envio de `session_id`
+- **Memória de Conversa**: contexto entre turnos por sessão (`session_id` devolvido em cada resposta)
+- **Evidências**: cada resposta de RAG/web devolve `evidence.sources` com as fontes
 
 ## 🛠️ Instalação
 
@@ -35,28 +35,19 @@ pip install -r requirements.txt
 
 ### 3. Configure as variáveis de ambiente
 ```bash
-# Copie o arquivo de exemplo
 cp .env.example .env
-
-# Edite o arquivo .env com suas chaves
-nano .env
+# edite .env e preencha OPENAI_API_KEY
 ```
 
-**Variáveis obrigatórias:**
-```env
-OPENAI_API_KEY=your_openai_api_key_here
-```
-
-**Variáveis opcionais:**
-```env
-GOOGLE_API_KEY=your_google_api_key_here
-GOOGLE_SEARCH_ENGINE_ID=your_search_engine_id_here
-```
+**Obrigatória:** `OPENAI_API_KEY`
+**Opcionais:** `OPENAI_MODEL`, `GOOGLE_API_KEY` + `GOOGLE_SEARCH_ENGINE_ID` (busca web ao vivo),
+`HOST`, `PORT`, `LOG_LEVEL`, `ALLOWED_ORIGINS`.
 
 ### 4. Configure o frontend React
 ```bash
 cd frontend
 npm install
+cp .env.example .env   # opcional: ajuste REACT_APP_API_URL
 cd ..
 ```
 
@@ -85,14 +76,14 @@ npm start
 ## 🧪 Testes
 
 ```bash
-# Execute todos os testes
-pytest tests/ -v
+# Todos os testes (configuração em pytest.ini)
+pytest
 
-# Testes específicos do desafio
+# Só os casos do desafio
 pytest tests/test_challenge_cases.py -v
 
 # Com cobertura
-pytest --cov=app tests/
+pytest --cov=app
 ```
 
 ## 📊 Casos de Teste
@@ -119,10 +110,17 @@ curl -X POST "http://localhost:8000/chat" \
 ```
 
 ### Outros Endpoints
-- `GET /` - Health check
-- `GET /health` - Status detalhado
-- `GET /docs` - Documentação Swagger
-- `GET /examples` - Exemplos de consultas
+- `GET /` - status básico
+- `GET /health` - status detalhado das dependências (`healthy`/`degraded`)
+- `POST /chat/{session_id}` - chat vinculado a uma sessão pela URL
+- `GET /sessions/{session_id}/context` - resumo do contexto da sessão
+- `GET /sessions/stats` - estatísticas das sessões
+- `DELETE /sessions/{session_id}` - remove a sessão (404 se não existir)
+- `GET /docs` - documentação Swagger
+- `GET /examples` - exemplos de consultas
+
+Para manter contexto entre mensagens, reenvie o `session_id` retornado na
+resposta anterior (o `POST /chat` aceita `session_id` no corpo).
 
 ## 📁 Estrutura do Projeto
 

@@ -2,12 +2,11 @@
 Sistema de memória de conversa para o chatbot
 Implementa contexto entre turnos da conversa
 """
-import json
 import logging
-from typing import Dict, Any, List, Optional
-from datetime import datetime, timedelta
-from dataclasses import dataclass, asdict
 import uuid
+from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
+from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -108,8 +107,8 @@ class ConversationMemory:
             session_id=session_id,
             messages=[],
             context_data={},
-            last_activity=datetime.now(),
-            created_at=datetime.now()
+            last_activity=datetime.now(timezone.utc),
+            created_at=datetime.now(timezone.utc)
         )
         
         self.sessions[session_id] = context
@@ -140,7 +139,7 @@ class ConversationMemory:
         message = Message(
             role=role,
             content=content,
-            timestamp=datetime.now(),
+            timestamp=datetime.now(timezone.utc),
             tool_used=tool_used,
             evidence=evidence
         )
@@ -148,7 +147,7 @@ class ConversationMemory:
         # Adiciona à sessão
         session = self.sessions[session_id]
         session.messages.append(message)
-        session.last_activity = datetime.now()
+        session.last_activity = datetime.now(timezone.utc)
         
         # Limita número de mensagens
         if len(session.messages) > self.max_messages_per_session:
@@ -173,9 +172,29 @@ class ConversationMemory:
         
         session = self.sessions[session_id]
         messages = session.messages[-max_messages:] if max_messages > 0 else session.messages
-        
+
         return messages
-    
+
+    def get_history_for_llm(self, session_id: str, max_messages: int = 8) -> List[Dict[str, str]]:
+        """
+        Histórico recente no formato do chat da OpenAI, sem a última mensagem
+        (que é a que está sendo processada agora).
+        """
+        if session_id not in self.sessions:
+            return []
+
+        previous = self.sessions[session_id].messages[:-1]
+        history = [
+            {"role": msg.role, "content": msg.content}
+            for msg in previous
+            if msg.role in ("user", "assistant")
+        ]
+        return history[-max_messages:]
+
+    def delete_session(self, session_id: str) -> bool:
+        """Remove uma sessão. Retorna True se ela existia."""
+        return self.sessions.pop(session_id, None) is not None
+
     def get_context_summary(self, session_id: str) -> Dict[str, Any]:
         """
         Obtém resumo do contexto da conversa
@@ -275,7 +294,7 @@ class ConversationMemory:
         
         session = self.sessions[session_id]
         session.context_data[key] = value
-        session.last_activity = datetime.now()
+        session.last_activity = datetime.now(timezone.utc)
         
         return True
     
@@ -299,7 +318,7 @@ class ConversationMemory:
     
     def _cleanup_expired_sessions(self):
         """Remove sessões expiradas"""
-        now = datetime.now()
+        now = datetime.now(timezone.utc)
         expired_sessions = []
         
         for session_id, session in self.sessions.items():
@@ -334,7 +353,7 @@ class ConversationMemory:
         total_messages = sum(len(session.messages) for session in self.sessions.values())
         
         # Sessões ativas (últimas 1 hora)
-        now = datetime.now()
+        now = datetime.now(timezone.utc)
         active_sessions = sum(
             1 for session in self.sessions.values()
             if now - session.last_activity < timedelta(hours=1)

@@ -87,6 +87,9 @@ pytest tests/test_challenge_cases.py -v
 
 # Com cobertura
 pytest --cov=app
+
+# Frontend
+cd frontend && npm test -- --watchAll=false
 ```
 
 ### Qualidade de código

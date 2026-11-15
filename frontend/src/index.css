@@ -2,7 +2,8 @@
 @tailwind components;
 @tailwind utilities;
 
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+/* A fonte Inter é carregada no public/index.html. Um @import aqui, depois dos
+   @tailwind, seria ignorado pelo navegador: o CSS exige @import no início. */
 
 * {
   margin: 0;
@@ -18,6 +19,14 @@ body {
   -moz-osx-font-smoothing: grayscale;
   background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
   min-height: 100vh;
+}
+
+/* Altura da tela inteira. No celular, 100vh inclui a barra de endereço e
+   esconde o campo de mensagem; 100dvh desconta essa barra. O 100vh fica como
+   reserva para navegadores sem suporte a dvh. */
+.app-shell {
+  height: 100vh;
+  height: 100dvh;
 }
 
 code {
@@ -93,7 +102,7 @@ code {
 
 .message-bubble.user::before {
   right: -16px;
-  border-left-color: #3b82f6;
+  border-left-color: #2563eb; /* mesma cor do balão (bg-blue-600) */
 }
 
 .message-bubble.assistant::before {

@@ -1,5 +1,6 @@
 """Regressões: perguntas que recebiam resposta errada antes da revisão."""
 from datetime import date
+from typing import Any
 from unittest.mock import AsyncMock
 
 import httpx
@@ -26,9 +27,10 @@ def agent(monkeypatch) -> PayrollAgent:
     return agent
 
 
-async def _chat(agent: PayrollAgent, *messages: str):
+async def _chat(agent: PayrollAgent, *messages: str) -> dict[str, Any]:
     """Envia as mensagens na mesma sessão e devolve a última resposta."""
-    session_id, result = None, None
+    session_id: str | None = None
+    result: dict[str, Any] = {}
     for message in messages:
         result = await agent.process_query(message, session_id)
         session_id = result["session_id"]

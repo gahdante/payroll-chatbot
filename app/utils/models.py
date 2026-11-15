@@ -9,7 +9,7 @@ class ChatRequest(BaseModel):
     """Requisição do endpoint de chat."""
 
     message: str = Field(..., min_length=1, max_length=1000, description="Mensagem do usuário")
-    session_id: Optional[str] = Field(None, description="ID de sessão para manter o contexto")
+    session_id: Optional[str] = Field(default=None, description="ID de sessão para manter o contexto")
 
     @field_validator("message")
     @classmethod
@@ -25,8 +25,8 @@ class ChatResponse(BaseModel):
 
     response: str = Field(..., description="Resposta do chatbot")
     tool_used: str = Field(..., description="Ferramenta usada: rag, web, general ou error")
-    evidence: Optional[Dict[str, Any]] = Field(None, description="Fontes/evidências da resposta")
-    session_id: Optional[str] = Field(None, description="ID da sessão desta conversa")
+    evidence: Optional[Dict[str, Any]] = Field(default=None, description="Fontes/evidências da resposta")
+    session_id: Optional[str] = Field(default=None, description="ID da sessão desta conversa")
 
 
 class HealthCheck(BaseModel):

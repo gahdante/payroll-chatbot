@@ -12,7 +12,7 @@ def normalize(text: str) -> str:
 
 
 @lru_cache(maxsize=None)
-def _terms_pattern(terms: tuple) -> Pattern[str]:
+def _terms_pattern(terms: tuple[str, ...]) -> Pattern[str]:
     alternatives = "|".join(
         re.escape(normalize(term)) for term in sorted(terms, key=len, reverse=True)
     )

@@ -14,7 +14,7 @@ from .utils.models import ChatRequest, ChatResponse, HealthCheck
 logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO").upper())
 logger = logging.getLogger(__name__)
 
-_state: dict = {"agent": None}
+_state: dict[str, PayrollAgent | None] = {"agent": None}
 
 
 @asynccontextmanager

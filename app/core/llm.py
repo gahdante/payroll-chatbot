@@ -5,6 +5,7 @@ from typing import Dict, List, Optional
 
 from dotenv import load_dotenv
 from openai import AsyncOpenAI
+from openai.types.chat import ChatCompletionMessageParam
 
 load_dotenv()
 
@@ -49,10 +50,17 @@ class LLMConfig:
         history: Optional[List[Dict[str, str]]] = None,
     ) -> str:
         """Gera uma resposta conversacional, opcionalmente com histórico recente."""
-        messages: List[Dict[str, str]] = [{"role": "system", "content": self.get_system_prompt()}]
+        messages: List[ChatCompletionMessageParam] = [
+            {"role": "system", "content": self.get_system_prompt()}
+        ]
         for turn in history or []:
-            if turn.get("role") in ("user", "assistant") and turn.get("content"):
-                messages.append({"role": turn["role"], "content": turn["content"]})
+            role, content = turn.get("role"), turn.get("content")
+            if not content:
+                continue
+            if role == "user":
+                messages.append({"role": "user", "content": content})
+            elif role == "assistant":
+                messages.append({"role": "assistant", "content": content})
         messages.append({"role": "user", "content": message})
 
         try:

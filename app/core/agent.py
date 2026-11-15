@@ -74,6 +74,7 @@ class PayrollAgent:
         )
         self.memory.add_message(session_id, "user", message)
 
+        result: Dict[str, Any]
         try:
             kind, follow_up = self._route(message, has_payroll_context)
             if kind == "rag":

@@ -5,12 +5,23 @@ from typing import Any
 
 from pydantic import BaseModel, Field, field_validator
 
+# O frontend usa os mesmos limites (frontend/src/apiErrors.js).
+MAX_MESSAGE_LENGTH = 1000
+# Um UUID tem 36 caracteres; o limite evita IDs enormes guardados em memória.
+MAX_SESSION_ID_LENGTH = 64
+
 
 class ChatRequest(BaseModel):
     """Requisição do endpoint de chat."""
 
-    message: str = Field(..., min_length=1, max_length=1000, description="Mensagem do usuário")
-    session_id: str | None = Field(default=None, description="ID de sessão para manter o contexto")
+    message: str = Field(
+        ..., min_length=1, max_length=MAX_MESSAGE_LENGTH, description="Mensagem do usuário"
+    )
+    session_id: str | None = Field(
+        default=None,
+        max_length=MAX_SESSION_ID_LENGTH,
+        description="ID de sessão para manter o contexto",
+    )
 
     @field_validator("message")
     @classmethod

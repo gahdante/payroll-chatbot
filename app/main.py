@@ -2,18 +2,35 @@
 
 import logging
 import os
+from collections.abc import Mapping
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
+from typing import Annotated, Any
 
-from fastapi import Depends, FastAPI, HTTPException, Request
+from dotenv import load_dotenv
+from fastapi import Depends, FastAPI, HTTPException, Path, Request
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from .core.agent import PayrollAgent
-from .utils.models import ChatRequest, ChatResponse, HealthCheck
+from .utils.models import (
+    MAX_MESSAGE_LENGTH,
+    MAX_SESSION_ID_LENGTH,
+    ChatRequest,
+    ChatResponse,
+    HealthCheck,
+)
+
+# Antes de ler qualquer variável: LOG_LEVEL e ALLOWED_ORIGINS logo abaixo, e as
+# chaves da OpenAI e do Google quando o agente é criado.
+load_dotenv()
 
 logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO").upper())
 logger = logging.getLogger(__name__)
+
+APP_VERSION = "1.0.0"
 
 _state: dict[str, PayrollAgent | None] = {"agent": None}
 
@@ -24,16 +41,14 @@ async def lifespan(_app: FastAPI):
     _state["agent"] = PayrollAgent()
     logger.info("Agente pronto.")
     yield
-    agent = _state.get("agent")
-    if agent:
-        agent.cleanup_sessions()
+    _state["agent"] = None
     logger.info("Aplicação finalizada.")
 
 
 app = FastAPI(
     title="Chatbot de Folha de Pagamento",
     description="Consultas de folha de pagamento com RAG, busca web e memória de conversa.",
-    version="1.0.0",
+    version=APP_VERSION,
     lifespan=lifespan,
 )
 
@@ -62,7 +77,11 @@ def get_agent() -> PayrollAgent:
 
 @app.get("/")
 async def root():
-    return {"message": "Chatbot de Folha de Pagamento API", "version": "1.0.0", "status": "running"}
+    return {
+        "message": "Chatbot de Folha de Pagamento API",
+        "version": APP_VERSION,
+        "status": "running",
+    }
 
 
 @app.get("/health", response_model=HealthCheck)
@@ -70,24 +89,26 @@ async def health_check(agent: PayrollAgent = Depends(get_agent)):
     agent.rag.ensure_loaded()
     dependencies = {
         "rag": "ok" if not agent.rag.df.empty else "sem dados",
-        "llm": "ok" if agent.llm.api_key else "sem OPENAI_API_KEY",
+        "llm": "ok" if agent.llm.available else "sem OPENAI_API_KEY",
         "web_search": "google" if not agent.web_search.use_fallback else "referencia-local",
         "memory": f"{len(agent.memory.sessions)} sessao(oes)",
     }
     healthy = dependencies["rag"] == "ok" and dependencies["llm"] == "ok"
     return HealthCheck(
         status="healthy" if healthy else "degraded",
-        version="1.0.0",
+        version=APP_VERSION,
         dependencies=dependencies,
     )
 
 
-async def _run_chat(agent: PayrollAgent, message: str, session_id: "str | None") -> ChatResponse:
+async def _run_chat(agent: PayrollAgent, message: str, session_id: str | None) -> ChatResponse:
     try:
         result = await agent.process_query(message, session_id)
     except Exception:
         logger.exception("Erro no /chat")
-        raise HTTPException(status_code=500, detail="Erro interno ao processar a mensagem")
+        raise HTTPException(
+            status_code=500, detail="Erro interno ao processar a mensagem"
+        ) from None
     return ChatResponse(
         response=result["response"],
         evidence=result.get("evidence"),
@@ -103,7 +124,9 @@ async def chat(request: ChatRequest, agent: PayrollAgent = Depends(get_agent)):
 
 @app.post("/chat/{session_id}", response_model=ChatResponse)
 async def chat_with_session(
-    session_id: str, request: ChatRequest, agent: PayrollAgent = Depends(get_agent)
+    session_id: Annotated[str, Path(max_length=MAX_SESSION_ID_LENGTH)],
+    request: ChatRequest,
+    agent: PayrollAgent = Depends(get_agent),
 ):
     return await _run_chat(agent, request.message, session_id)
 
@@ -144,29 +167,57 @@ async def examples():
     }
 
 
-@app.exception_handler(HTTPException)
-async def http_exception_handler(_request: Request, exc: HTTPException):
-    return JSONResponse(
-        status_code=exc.status_code,
-        content={
-            "error": exc.detail,
-            "status_code": exc.status_code,
-            "timestamp": datetime.now(UTC).isoformat(),
-        },
-    )
+# Erros --------------------------------------------------------------------------
+# Todos os erros saem no mesmo formato: {"error", "status_code", "timestamp"},
+# mais "details" nos erros de validação.
+
+
+def _error_response(
+    status_code: int,
+    message: str,
+    details: list[dict[str, str]] | None = None,
+    headers: Mapping[str, str] | None = None,
+) -> JSONResponse:
+    content: dict[str, Any] = {
+        "error": message,
+        "status_code": status_code,
+        "timestamp": datetime.now(UTC).isoformat(),
+    }
+    if details is not None:
+        content["details"] = details
+    return JSONResponse(status_code=status_code, content=content, headers=headers)
+
+
+@app.exception_handler(StarletteHTTPException)
+async def http_exception_handler(_request: Request, exc: StarletteHTTPException):
+    # Também cobre os 404/405 de rota inexistente, que o Starlette gera sozinho.
+    return _error_response(exc.status_code, str(exc.detail), headers=exc.headers)
+
+
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(_request: Request, exc: RequestValidationError):
+    errors = [dict(error) for error in exc.errors()]
+    fields = {str(part) for error in errors for part in error.get("loc", ())}
+    if "message" in fields:
+        message = f"A mensagem precisa ter entre 1 e {MAX_MESSAGE_LENGTH} caracteres."
+    elif "session_id" in fields:
+        message = f"O session_id pode ter no máximo {MAX_SESSION_ID_LENGTH} caracteres."
+    else:
+        message = "Dados inválidos na requisição."
+    details = [
+        {
+            "campo": ".".join(str(part) for part in error.get("loc", ())),
+            "mensagem": str(error.get("msg", "")),
+        }
+        for error in errors
+    ]
+    return _error_response(422, message, details=details)
 
 
 @app.exception_handler(Exception)
 async def unhandled_exception_handler(_request: Request, exc: Exception):
     logger.exception("Erro não tratado: %s", exc)
-    return JSONResponse(
-        status_code=500,
-        content={
-            "error": "Erro interno do servidor",
-            "status_code": 500,
-            "timestamp": datetime.now(UTC).isoformat(),
-        },
-    )
+    return _error_response(500, "Erro interno do servidor")
 
 
 if __name__ == "__main__":

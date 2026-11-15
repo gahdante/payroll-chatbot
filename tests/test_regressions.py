@@ -1,6 +1,6 @@
 """Regressões: perguntas que recebiam resposta errada antes da revisão."""
 
-from datetime import date
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import Any
 from unittest.mock import AsyncMock
@@ -8,7 +8,9 @@ from unittest.mock import AsyncMock
 import httpx
 import pandas as pd
 import pytest
+import uvicorn
 
+import run
 from app.core.agent import PayrollAgent
 from app.core.conversation_memory import ConversationMemory
 from app.tools.payroll_rag import PayrollRAG
@@ -64,7 +66,8 @@ class TestAggregates:
     async def test_year_is_a_period_filter(self, rag: PayrollRAG):
         r = await rag.query("Qual o total de bônus do Bruno em 2025?")
         assert f"Total de bônus: {format_currency(2800)}" in r["data"]
-        assert "ano de 2025" in r["data"]
+        assert r["data"].startswith("Bruno Lima — 2025:")
+        assert "ano de" not in r["data"]
 
     async def test_last_quarter_is_the_latest_with_data(self, rag: PayrollRAG):
         r = await rag.query("Quanto a Ana recebeu no último trimestre?")
@@ -242,3 +245,102 @@ class TestSelic:
         r = await ws.search_with_citation("Qual a Selic hoje?")
         assert r["success"] is True
         assert "note" in r
+
+
+class TestSessionLimit:
+    def test_limit_applies_while_running(self):
+        # Antes, max_sessions só era aplicado no desligamento do servidor.
+        memory = ConversationMemory(max_sessions=3)
+        for _ in range(10):
+            memory.create_session()
+        assert len(memory.sessions) == 3
+
+    def test_least_recently_active_goes_first(self):
+        memory = ConversationMemory(max_sessions=3)
+        for session_id in ("a", "b", "c"):
+            memory.create_session(session_id)
+        now = datetime.now(UTC)
+        memory.sessions["a"].last_activity = now - timedelta(seconds=1)  # usada agora há pouco
+        memory.sessions["b"].last_activity = now - timedelta(minutes=3)
+        memory.sessions["c"].last_activity = now - timedelta(minutes=2)
+
+        memory.create_session("d")
+        assert set(memory.sessions) == {"a", "c", "d"}
+
+    def test_expired_sessions_are_removed(self):
+        memory = ConversationMemory()
+        memory.create_session("antiga")
+        memory.sessions["antiga"].last_activity = datetime.now(UTC) - timedelta(hours=25)
+        memory.create_session("nova")
+        assert set(memory.sessions) == {"nova"}
+
+
+class TestRunScript:
+    @pytest.fixture
+    def project(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> list[dict[str, Any]]:
+        """Projeto falso em tmp_path; devolve os argumentos passados ao uvicorn.run."""
+        (tmp_path / "app").mkdir()
+        (tmp_path / "app" / "main.py").write_text("")
+        (tmp_path / ".env").write_text("HOST=127.0.0.2\nPORT=9999\nLOG_LEVEL=DEBUG\n")
+        for var in ("HOST", "PORT", "LOG_LEVEL"):
+            # setenv antes do delenv: assim o monkeypatch apaga, no fim do teste,
+            # o que o load_dotenv gravar em os.environ.
+            monkeypatch.setenv(var, "x")
+            monkeypatch.delenv(var)
+        monkeypatch.chdir(tmp_path)
+        calls: list[dict[str, Any]] = []
+
+        def fake_uvicorn_run(*_args: object, **kwargs: Any) -> None:
+            calls.append(kwargs)
+
+        monkeypatch.setattr(uvicorn, "run", fake_uvicorn_run)
+        return calls
+
+    def test_reads_env_file(self, project: list[dict[str, Any]]):
+        run.main()
+        assert project[0]["host"] == "127.0.0.2"
+        assert project[0]["port"] == 9999
+        assert project[0]["log_level"] == "debug"
+
+    def test_shell_variable_wins_over_env_file(
+        self, project: list[dict[str, Any]], monkeypatch: pytest.MonkeyPatch
+    ):
+        monkeypatch.setenv("PORT", "7000")
+        run.main()
+        assert project[0]["port"] == 7000
+
+
+class TestLLMOptional:
+    async def test_agent_works_without_api_key(self, monkeypatch: pytest.MonkeyPatch):
+        monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+        agent = PayrollAgent()
+        assert not agent.llm.available
+
+        general = await agent.process_query("Olá!")
+        assert general["tool_used"] == "general"
+        assert "folha de pagamento" in general["response"]
+
+        payroll = await agent.process_query("Quanto a Ana recebeu em maio/2025?")
+        assert payroll["tool_used"] == "rag"
+        assert format_currency(8418.75) in payroll["response"]
+
+
+class TestReferenceBase:
+    @pytest.mark.parametrize(
+        ("question", "expected"),
+        [
+            ("Como funciona o aviso prévio?", "Lei nº 12.506/2011"),
+            ("Qual o prazo para pagar a rescisão?", "CLT, art. 477"),
+            ("rescisao sem acento", "CLT, art. 477"),
+            ("Qual o salário mínimo?", "art. 7º, IV"),
+            ("Qual a alíquota do IRRF?", "Lei nº 7.713/1988"),
+            ("Como calcular férias proporcionais na rescisão?", "CLT, arts. 130 e 146"),
+            ("Como funciona o 13º salário?", "Lei nº 4.090/1962"),
+        ],
+    )
+    async def test_topic_has_its_own_entry(self, question: str, expected: str):
+        ws = WebSearch()
+        ws.use_fallback = True
+        r = await ws.search_with_citation(question)
+        assert expected in r["data"]
+        assert "Decreto-Lei nº 5.452/1943" not in r["data"]  # não caiu no texto genérico da CLT

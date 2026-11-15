@@ -71,8 +71,8 @@ _NAMED_PERIODS = {
     frozenset({"10", "11", "12"}): "4º trimestre",
     frozenset({f"{m:02d}" for m in range(1, 7)}): "1º semestre",
     frozenset({f"{m:02d}" for m in range(7, 13)}): "2º semestre",
-    frozenset({f"{m:02d}" for m in range(1, 13)}): "ano",
 }
+_FULL_YEAR = frozenset(f"{m:02d}" for m in range(1, 13))
 
 _AGGREGATE_TERMS = ("total", "soma", "somar", "somado", "media", "medio", "acumulado")
 _MAX_TERMS = ("maior", "mais alto", "mais alta", "maximo", "maxima")
@@ -408,7 +408,10 @@ class PayrollRAG:
             return format_competency(months[0])
         year = months[0][:4]
         if all(m[:4] == year for m in months):
-            label = _NAMED_PERIODS.get(frozenset(m[5:7] for m in months))
+            month_set = frozenset(m[5:7] for m in months)
+            if month_set == _FULL_YEAR:
+                return year  # "em 2025", e não "em ano de 2025"
+            label = _NAMED_PERIODS.get(month_set)
             if label:
                 return f"{label} de {year}"
         return f"{format_competency(months[0])} a {format_competency(months[-1])}"

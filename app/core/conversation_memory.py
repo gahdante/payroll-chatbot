@@ -1,11 +1,8 @@
-"""
-Sistema de memória de conversa para o chatbot
-Implementa contexto entre turnos da conversa
-"""
+"""Memória de conversa: contexto entre turnos, por sessão, guardado em memória."""
 
 import logging
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -24,9 +21,13 @@ _TOPIC_TERMS = {
 }
 
 
+def _now() -> datetime:
+    return datetime.now(UTC)
+
+
 @dataclass
 class Message:
-    """Representa uma mensagem na conversa"""
+    """Uma mensagem da conversa."""
 
     role: str  # "user" ou "assistant"
     content: str
@@ -34,104 +35,44 @@ class Message:
     tool_used: str | None = None
     evidence: dict[str, Any] | None = None
 
-    def to_dict(self) -> dict[str, Any]:
-        """Converte para dicionário"""
-        return {
-            "role": self.role,
-            "content": self.content,
-            "timestamp": self.timestamp.isoformat(),
-            "tool_used": self.tool_used,
-            "evidence": self.evidence,
-        }
-
-    @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "Message":
-        """Cria a partir de dicionário"""
-        return cls(
-            role=data["role"],
-            content=data["content"],
-            timestamp=datetime.fromisoformat(data["timestamp"]),
-            tool_used=data.get("tool_used"),
-            evidence=data.get("evidence"),
-        )
-
 
 @dataclass
 class ConversationContext:
-    """Representa o contexto de uma conversa"""
+    """Estado de uma sessão de conversa."""
 
     session_id: str
-    messages: list[Message]
-    context_data: dict[str, Any]
-    last_activity: datetime
-    created_at: datetime
-
-    def to_dict(self) -> dict[str, Any]:
-        """Converte para dicionário"""
-        return {
-            "session_id": self.session_id,
-            "messages": [msg.to_dict() for msg in self.messages],
-            "context_data": self.context_data,
-            "last_activity": self.last_activity.isoformat(),
-            "created_at": self.created_at.isoformat(),
-        }
-
-    @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "ConversationContext":
-        """Cria a partir de dicionário"""
-        return cls(
-            session_id=data["session_id"],
-            messages=[Message.from_dict(msg) for msg in data["messages"]],
-            context_data=data.get("context_data", {}),
-            last_activity=datetime.fromisoformat(data["last_activity"]),
-            created_at=datetime.fromisoformat(data["created_at"]),
-        )
+    messages: list[Message] = field(default_factory=list)
+    context_data: dict[str, Any] = field(default_factory=dict)
+    last_activity: datetime = field(default_factory=_now)
+    created_at: datetime = field(default_factory=_now)
 
 
 class ConversationMemory:
-    """Sistema de memória de conversa"""
+    """Sessões de conversa com limite de quantidade, de tamanho e de inatividade."""
 
-    def __init__(self, max_sessions: int = 100, max_messages_per_session: int = 50):
-        """
-        Inicializa o sistema de memória
-
-        Args:
-            max_sessions: Número máximo de sessões ativas
-            max_messages_per_session: Número máximo de mensagens por sessão
-        """
+    def __init__(
+        self,
+        max_sessions: int = 100,
+        max_messages_per_session: int = 50,
+        session_timeout: timedelta = timedelta(hours=24),
+    ):
         self.max_sessions = max_sessions
         self.max_messages_per_session = max_messages_per_session
+        self.session_timeout = session_timeout
         self.sessions: dict[str, ConversationContext] = {}
-        self.session_timeout = timedelta(hours=24)  # 24 horas de inatividade
 
     def create_session(self, session_id: str | None = None) -> str:
+        """Cria uma sessão e devolve o ID.
+
+        Antes, remove as sessões expiradas e, se o limite ``max_sessions`` já
+        foi atingido, as de atividade mais antiga.
         """
-        Cria uma nova sessão de conversa
-
-        Args:
-            session_id: ID da sessão (opcional)
-
-        Returns:
-            ID da sessão criada
-        """
-        if session_id is None:
-            session_id = str(uuid.uuid4())
-
-        # Remove sessões expiradas
+        session_id = session_id or str(uuid.uuid4())
         self._cleanup_expired_sessions()
+        self._evict_oldest_sessions(keep=self.max_sessions - 1)
 
-        # Cria nova sessão
-        context = ConversationContext(
-            session_id=session_id,
-            messages=[],
-            context_data={},
-            last_activity=datetime.now(UTC),
-            created_at=datetime.now(UTC),
-        )
-
-        self.sessions[session_id] = context
-        logger.info(f"Nova sessão criada: {session_id}")
-
+        self.sessions[session_id] = ConversationContext(session_id=session_id)
+        logger.info("Nova sessão criada: %s", session_id)
         return session_id
 
     def add_message(
@@ -142,62 +83,25 @@ class ConversationMemory:
         tool_used: str | None = None,
         evidence: dict[str, Any] | None = None,
     ) -> bool:
-        """
-        Adiciona mensagem à sessão
-
-        Args:
-            session_id: ID da sessão
-            role: Papel da mensagem ("user" ou "assistant")
-            content: Conteúdo da mensagem
-            tool_used: Ferramenta utilizada
-            evidence: Evidências da resposta
-
-        Returns:
-            True se adicionada com sucesso
-        """
-        if session_id not in self.sessions:
-            logger.warning(f"Sessão não encontrada: {session_id}")
+        """Adiciona uma mensagem à sessão. Retorna False se a sessão não existe."""
+        session = self.sessions.get(session_id)
+        if session is None:
+            logger.warning("Sessão não encontrada: %s", session_id)
             return False
 
-        # Cria mensagem
-        message = Message(
-            role=role,
-            content=content,
-            timestamp=datetime.now(UTC),
-            tool_used=tool_used,
-            evidence=evidence,
+        session.messages.append(
+            Message(
+                role=role,
+                content=content,
+                timestamp=_now(),
+                tool_used=tool_used,
+                evidence=evidence,
+            )
         )
-
-        # Adiciona à sessão
-        session = self.sessions[session_id]
-        session.messages.append(message)
-        session.last_activity = datetime.now(UTC)
-
-        # Limita número de mensagens
+        session.last_activity = _now()
         if len(session.messages) > self.max_messages_per_session:
             session.messages = session.messages[-self.max_messages_per_session :]
-
-        logger.debug(f"Mensagem adicionada à sessão {session_id}")
         return True
-
-    def get_conversation_history(self, session_id: str, max_messages: int = 10) -> list[Message]:
-        """
-        Obtém histórico da conversa
-
-        Args:
-            session_id: ID da sessão
-            max_messages: Número máximo de mensagens a retornar
-
-        Returns:
-            Lista de mensagens
-        """
-        if session_id not in self.sessions:
-            return []
-
-        session = self.sessions[session_id]
-        messages = session.messages[-max_messages:] if max_messages > 0 else session.messages
-
-        return messages
 
     def get_history_for_llm(self, session_id: str, max_messages: int = 8) -> list[dict[str, str]]:
         """
@@ -220,31 +124,10 @@ class ConversationMemory:
         return self.sessions.pop(session_id, None) is not None
 
     def get_context_summary(self, session_id: str) -> dict[str, Any]:
-        """
-        Obtém resumo do contexto da conversa
-
-        Args:
-            session_id: ID da sessão
-
-        Returns:
-            Resumo do contexto
-        """
-        if session_id not in self.sessions:
+        """Resumo da sessão: ferramentas usadas, temas, funcionários e competências."""
+        session = self.sessions.get(session_id)
+        if session is None:
             return {}
-
-        session = self.sessions[session_id]
-
-        # Analisa mensagens para extrair contexto
-        context_summary: dict[str, Any] = {
-            "session_id": session_id,
-            "total_messages": len(session.messages),
-            "last_activity": session.last_activity.isoformat(),
-            "created_at": session.created_at.isoformat(),
-            "tools_used": [],
-            "topics_discussed": [],
-            "employee_mentions": [],
-            "competencies_mentioned": [],
-        }
 
         # Funcionários e competências saem das evidências do RAG, não de texto livre.
         tools_used: set[str] = set()
@@ -267,132 +150,64 @@ class ConversationMemory:
                     if contains_any(message.content, terms)
                 )
 
-        context_summary["tools_used"] = sorted(tools_used)
-        context_summary["topics_discussed"] = sorted(topics)
-        context_summary["employee_mentions"] = sorted(employees)
-        context_summary["competencies_mentioned"] = sorted(competencies)
-
-        return context_summary
+        return {
+            "session_id": session_id,
+            "total_messages": len(session.messages),
+            "last_activity": session.last_activity.isoformat(),
+            "created_at": session.created_at.isoformat(),
+            "tools_used": sorted(tools_used),
+            "topics_discussed": sorted(topics),
+            "employee_mentions": sorted(employees),
+            "competencies_mentioned": sorted(competencies),
+        }
 
     def update_context_data(self, session_id: str, key: str, value: Any) -> bool:
-        """
-        Atualiza dados de contexto da sessão
-
-        Args:
-            session_id: ID da sessão
-            key: Chave do contexto
-            value: Valor do contexto
-
-        Returns:
-            True se atualizado com sucesso
-        """
-        if session_id not in self.sessions:
+        """Grava um dado de contexto na sessão. Retorna False se a sessão não existe."""
+        session = self.sessions.get(session_id)
+        if session is None:
             return False
-
-        session = self.sessions[session_id]
         session.context_data[key] = value
-        session.last_activity = datetime.now(UTC)
-
+        session.last_activity = _now()
         return True
 
     def get_context_data(self, session_id: str, key: str, default: Any = None) -> Any:
-        """
-        Obtém dados de contexto da sessão
-
-        Args:
-            session_id: ID da sessão
-            key: Chave do contexto
-            default: Valor padrão
-
-        Returns:
-            Valor do contexto ou padrão
-        """
-        if session_id not in self.sessions:
+        """Lê um dado de contexto da sessão (``default`` se não houver)."""
+        session = self.sessions.get(session_id)
+        if session is None:
             return default
-
-        session = self.sessions[session_id]
         return session.context_data.get(key, default)
 
-    def _cleanup_expired_sessions(self):
-        """Remove sessões expiradas"""
-        now = datetime.now(UTC)
-        expired_sessions: list[str] = []
-
-        for session_id, session in self.sessions.items():
-            if now - session.last_activity > self.session_timeout:
-                expired_sessions.append(session_id)
-
-        for session_id in expired_sessions:
+    def _cleanup_expired_sessions(self) -> None:
+        """Remove as sessões sem atividade há mais de ``session_timeout``."""
+        now = _now()
+        expired = [
+            session_id
+            for session_id, session in self.sessions.items()
+            if now - session.last_activity > self.session_timeout
+        ]
+        for session_id in expired:
             del self.sessions[session_id]
-            logger.info(f"Sessão expirada removida: {session_id}")
+            logger.info("Sessão expirada removida: %s", session_id)
 
-    def cleanup_old_sessions(self):
-        """Remove sessões mais antigas se exceder o limite"""
-        if len(self.sessions) <= self.max_sessions:
+    def _evict_oldest_sessions(self, keep: int) -> None:
+        """Mantém no máximo ``keep`` sessões, removendo as de atividade mais antiga."""
+        excess = len(self.sessions) - max(keep, 0)
+        if excess <= 0:
             return
-
-        # Ordena por última atividade
-        sorted_sessions = sorted(self.sessions.items(), key=lambda x: x[1].last_activity)
-
-        # Remove as mais antigas
-        sessions_to_remove = len(self.sessions) - self.max_sessions
-        for i in range(sessions_to_remove):
-            session_id = sorted_sessions[i][0]
-            del self.sessions[session_id]
-            logger.info(f"Sessão antiga removida: {session_id}")
+        by_activity = sorted(self.sessions.values(), key=lambda s: s.last_activity)
+        for session in by_activity[:excess]:
+            del self.sessions[session.session_id]
+            logger.info("Sessão antiga removida (limite de sessões): %s", session.session_id)
 
     def get_session_stats(self) -> dict[str, Any]:
-        """Obtém estatísticas das sessões"""
-        total_sessions = len(self.sessions)
-        total_messages = sum(len(session.messages) for session in self.sessions.values())
-
-        # Sessões ativas (últimas 1 hora)
-        now = datetime.now(UTC)
-        active_sessions = sum(
-            1
-            for session in self.sessions.values()
-            if now - session.last_activity < timedelta(hours=1)
-        )
-
+        """Totais de sessões e mensagens; "ativas" = com atividade na última hora."""
+        now = _now()
         return {
-            "total_sessions": total_sessions,
-            "total_messages": total_messages,
-            "active_sessions": active_sessions,
+            "total_sessions": len(self.sessions),
+            "total_messages": sum(len(s.messages) for s in self.sessions.values()),
+            "active_sessions": sum(
+                1 for s in self.sessions.values() if now - s.last_activity < timedelta(hours=1)
+            ),
             "max_sessions": self.max_sessions,
             "max_messages_per_session": self.max_messages_per_session,
         }
-
-    def export_session(self, session_id: str) -> dict[str, Any] | None:
-        """
-        Exporta dados da sessão
-
-        Args:
-            session_id: ID da sessão
-
-        Returns:
-            Dados da sessão ou None se não encontrada
-        """
-        if session_id not in self.sessions:
-            return None
-
-        session = self.sessions[session_id]
-        return session.to_dict()
-
-    def import_session(self, session_data: dict[str, Any]) -> bool:
-        """
-        Importa dados da sessão
-
-        Args:
-            session_data: Dados da sessão
-
-        Returns:
-            True se importado com sucesso
-        """
-        try:
-            session = ConversationContext.from_dict(session_data)
-            self.sessions[session.session_id] = session
-            logger.info(f"Sessão importada: {session.session_id}")
-            return True
-        except (KeyError, TypeError, ValueError) as e:
-            logger.error(f"Erro ao importar sessão: {e}")
-            return False

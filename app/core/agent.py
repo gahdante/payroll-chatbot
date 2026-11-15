@@ -10,7 +10,7 @@ from ..tools.payroll_rag import PayrollRAG, QueryParams
 from ..tools.web_search import WebSearch
 from ..utils.text import contains_any, normalize
 from .conversation_memory import ConversationMemory
-from .llm import LLMConfig
+from .llm import LLMConfig, LLMUnavailableError
 
 logger = logging.getLogger(__name__)
 
@@ -63,6 +63,12 @@ _FOLLOW_UP_START = re.compile(r"^\W*(?:e|agora|tambem|entao)\b")
 _FOLLOW_UP_MAX_WORDS = 4
 
 _CONTEXT_KEY = "payroll_params"
+
+# Resposta da conversa geral quando o LLM não está configurado ou falhou.
+_GENERAL_FALLBACK = (
+    "Posso ajudar com consultas de folha de pagamento (valores, descontos, "
+    "competências) e dúvidas de legislação trabalhista. O que você precisa?"
+)
 
 
 class PayrollAgent:
@@ -172,12 +178,11 @@ class PayrollAgent:
         history = self.memory.get_history_for_llm(session_id)
         try:
             answer = await self.llm.generate_response(message, history=history)
+        except LLMUnavailableError:
+            answer = _GENERAL_FALLBACK
         except OpenAIError as exc:
             logger.warning("Falha no LLM (conversa geral): %s", exc)
-            answer = (
-                "Posso ajudar com consultas de folha de pagamento (valores, descontos, "
-                "competências) e dúvidas de legislação trabalhista. O que você precisa?"
-            )
+            answer = _GENERAL_FALLBACK
         return {"response": answer, "evidence": None, "tool_used": "general"}
 
     # helpers usados pela API -------------------------------------------------
@@ -189,6 +194,3 @@ class PayrollAgent:
 
     def delete_session(self, session_id: str) -> bool:
         return self.memory.delete_session(session_id)
-
-    def cleanup_sessions(self) -> None:
-        self.memory.cleanup_old_sessions()

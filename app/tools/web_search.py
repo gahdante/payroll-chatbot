@@ -36,9 +36,13 @@ _CLT_ENTRY = {
     "reference": "Decreto-Lei nº 5.452/1943",
 }
 
+# Base de referência local. Cada tema casa por palavra inteira, sem acento e sem
+# diferenciar maiúsculas (ver utils.text). Vale o primeiro tema que casar, então
+# os mais específicos vêm antes. Só regras estáveis: valores que mudam todo ano
+# (salário mínimo, faixas de IRRF e INSS) ficam para a fonte oficial citada.
 _REFERENCE = [
     (
-        ("selic", "taxa básica", "taxa basica", "taxa de juros"),
+        ("selic", "taxa basica", "taxa de juros"),
         {
             "title": "Taxa Selic — Banco Central do Brasil",
             "url": "https://www.bcb.gov.br/controleinflacao/taxaselic",
@@ -48,13 +52,60 @@ _REFERENCE = [
         },
     ),
     (
-        ("férias", "ferias"),
+        ("aviso previo",),
+        {
+            "title": "Aviso prévio — CLT e Lei nº 12.506/2011",
+            "url": "https://www.planalto.gov.br/ccivil_03/_ato2011-2014/2011/lei/l12506.htm",
+            "snippet": "O aviso prévio é de 30 dias para até 1 ano de serviço na mesma empresa, com mais 3 dias por ano completo, até o máximo de 90 dias.",
+            "reference": "CLT, art. 487, e Lei nº 12.506/2011",
+            "detail": "No aviso trabalhado dado pelo empregador, o empregado pode reduzir a jornada em 2 horas por dia ou faltar 7 dias corridos, sem desconto no salário (CLT, art. 488).",
+        },
+    ),
+    (
+        ("ferias",),
         {
             "title": "Férias — CLT, arts. 129 a 145",
             "url": "https://www.planalto.gov.br/ccivil_03/decreto-lei/del5452.htm",
             "snippet": "Férias proporcionais correspondem a 1/12 por mês trabalhado (ou fração superior a 14 dias).",
             "reference": "CLT, arts. 130 e 146",
             "detail": "Sobre a remuneração de férias incide o adicional de 1/3 (CF, art. 7º, XVII).",
+        },
+    ),
+    (
+        (
+            "rescisao",
+            "rescisoria",
+            "rescisorias",
+            "demissao",
+            "dispensa",
+            "justa causa",
+        ),
+        {
+            "title": "Rescisão do contrato de trabalho — CLT, art. 477",
+            "url": "https://www.planalto.gov.br/ccivil_03/decreto-lei/del5452.htm",
+            "snippet": "As verbas rescisórias devem ser pagas em até 10 dias contados do término do contrato.",
+            "reference": "CLT, art. 477, § 6º",
+            "detail": "Na dispensa sem justa causa, o empregador também deposita multa de 40% sobre o saldo do FGTS (Lei nº 8.036/1990, art. 18, § 1º).",
+        },
+    ),
+    (
+        ("salario minimo",),
+        {
+            "title": "Salário mínimo — Constituição Federal, art. 7º, IV",
+            "url": "https://www.planalto.gov.br/ccivil_03/constituicao/constituicao.htm",
+            "snippet": "A Constituição garante um salário mínimo fixado em lei e nacionalmente unificado.",
+            "reference": "Constituição Federal, art. 7º, IV",
+            "detail": "O valor é reajustado todo ano, e alguns estados têm pisos regionais maiores (Lei Complementar nº 103/2000). Confirme o valor vigente em fonte oficial.",
+        },
+    ),
+    (
+        ("irrf", "imposto de renda"),
+        {
+            "title": "IRRF sobre salários — tabela progressiva mensal",
+            "url": "https://www.gov.br/receitafederal/pt-br",
+            "snippet": "O imposto de renda retido na fonte sobre salários segue a tabela progressiva mensal, com alíquotas que sobem por faixa de renda.",
+            "reference": "Lei nº 7.713/1988 e tabela progressiva vigente (Receita Federal)",
+            "detail": "Da base de cálculo saem a contribuição ao INSS e o valor por dependente (ou o desconto simplificado mensal). As faixas mudam por lei; confirme a tabela vigente no site da Receita Federal.",
         },
     ),
     (
@@ -68,7 +119,7 @@ _REFERENCE = [
         },
     ),
     (
-        ("inss", "previdência", "previdencia", "contribuição previdenciária"),
+        ("inss", "previdencia", "contribuicao previdenciaria"),
         {
             "title": "Contribuição ao INSS — tabela progressiva",
             "url": "https://www.gov.br/inss",
@@ -78,7 +129,7 @@ _REFERENCE = [
         },
     ),
     (
-        ("13º", "13o", "décimo terceiro", "decimo terceiro", "gratificação natalina"),
+        ("13o", "decimo terceiro", "gratificacao natalina"),
         {
             "title": "13º salário (gratificação natalina)",
             "url": "https://www.planalto.gov.br/ccivil_03/leis/l4090.htm",
@@ -141,9 +192,8 @@ class WebSearch:
         return {"success": bool(results), "results": results, "query": query, "fallback": False}
 
     def _reference_search(self, query: str) -> dict[str, Any]:
-        q = query.lower()
         chosen = next(
-            (entry for keys, entry in _REFERENCE if any(k in q for k in keys)), _CLT_ENTRY
+            (entry for keys, entry in _REFERENCE if contains_any(query, keys)), _CLT_ENTRY
         )
         return {"success": True, "results": [chosen], "query": query, "fallback": True}
 

@@ -35,8 +35,10 @@ venv.bak/
 .env.test.local
 .env.production.local
 
-# IDE
-.vscode/
+# IDE (a configuração do VS Code compartilhada pelo projeto vai para o Git)
+.vscode/*
+!.vscode/settings.json
+!.vscode/css_custom_data.json
 .idea/
 *.swp
 *.swo

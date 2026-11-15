@@ -3,11 +3,8 @@
 import logging
 import os
 
-from dotenv import load_dotenv
 from openai import AsyncOpenAI
 from openai.types.chat import ChatCompletionMessageParam
-
-load_dotenv()
 
 logger = logging.getLogger(__name__)
 
@@ -25,20 +22,36 @@ _SYSTEM_PROMPT = """Você é um assistente de folha de pagamento brasileiro, cor
 - Seja breve: uma resposta útil, sem enrolação."""
 
 
+class LLMUnavailableError(RuntimeError):
+    """O LLM não está configurado (falta OPENAI_API_KEY)."""
+
+
 class LLMConfig:
-    """Configuração e acesso ao modelo de linguagem."""
+    """Configuração e acesso ao modelo de linguagem.
+
+    Sem ``OPENAI_API_KEY`` o LLM fica indisponível, mas o resto do chatbot
+    (consultas de folha e busca web) não depende dele e continua funcionando.
+    """
 
     def __init__(self) -> None:
-        self.api_key = os.getenv("OPENAI_API_KEY")
+        self.api_key = os.getenv("OPENAI_API_KEY") or None
         self.model = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
         self.temperature = float(os.getenv("OPENAI_TEMPERATURE", "0.2"))
         self.max_tokens = int(os.getenv("OPENAI_MAX_TOKENS", "600"))
         self.request_timeout = float(os.getenv("OPENAI_TIMEOUT", "30"))
 
-        if not self.api_key:
-            raise ValueError("OPENAI_API_KEY não encontrada nas variáveis de ambiente")
+        self.client: AsyncOpenAI | None = None
+        if self.api_key:
+            self.client = AsyncOpenAI(api_key=self.api_key, timeout=self.request_timeout)
+        else:
+            logger.warning(
+                "OPENAI_API_KEY não definida: a conversa geral vai responder com uma "
+                "mensagem padrão. Consultas de folha e busca web funcionam normalmente."
+            )
 
-        self.client = AsyncOpenAI(api_key=self.api_key, timeout=self.request_timeout)
+    @property
+    def available(self) -> bool:
+        return self.client is not None
 
     @staticmethod
     def get_system_prompt() -> str:
@@ -49,7 +62,13 @@ class LLMConfig:
         message: str,
         history: list[dict[str, str]] | None = None,
     ) -> str:
-        """Gera uma resposta conversacional, opcionalmente com histórico recente."""
+        """Gera uma resposta conversacional, opcionalmente com histórico recente.
+
+        Levanta ``LLMUnavailableError`` se o LLM não estiver configurado.
+        """
+        if self.client is None:
+            raise LLMUnavailableError("OPENAI_API_KEY não configurada")
+
         messages: list[ChatCompletionMessageParam] = [
             {"role": "system", "content": self.get_system_prompt()}
         ]

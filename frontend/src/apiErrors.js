@@ -6,9 +6,10 @@ const isMessageField = (item) => Array.isArray(item?.loc) && item.loc.includes('
 /**
  * Texto de erro para mostrar no chat, a partir de um erro do axios.
  *
- * O backend responde em dois formatos: {"error": "..."} (erros da aplicação)
- * e {"detail": ...} (404 e validação do FastAPI). No erro de validação (422),
- * "detail" é uma lista de objetos, que não pode ir direto para a tela.
+ * O backend responde todos os erros como {"error": "..."}. O formato padrão do
+ * FastAPI, {"detail": ...}, continua tratado por segurança (por exemplo, numa
+ * API mais antiga). No 422 dele, "detail" é uma lista de objetos, que não pode
+ * ir direto para a tela.
  */
 export function getErrorMessage(error) {
   if (error?.code === 'ERR_CANCELED' || error?.name === 'CanceledError') {

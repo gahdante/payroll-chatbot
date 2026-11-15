@@ -34,6 +34,9 @@ venv\Scripts\activate     # Windows
 
 # Instale as dependências
 pip install -r requirements.txt
+
+# Para desenvolver (testes, lint e tipos), instale também as de desenvolvimento
+pip install -r requirements-dev.txt
 ```
 
 ### 3. Configure as variáveis de ambiente
@@ -42,9 +45,13 @@ cp .env.example .env
 # edite .env e preencha OPENAI_API_KEY
 ```
 
-**Obrigatória:** `OPENAI_API_KEY`
+**Recomendada:** `OPENAI_API_KEY`. Sem ela, a API sobe normalmente: as consultas de
+folha e a busca web funcionam, a conversa geral responde com uma mensagem padrão e o
+`/health` mostra `degraded`.
 **Opcionais:** `OPENAI_MODEL`, `GOOGLE_API_KEY` + `GOOGLE_SEARCH_ENGINE_ID` (busca web ao vivo),
 `HOST`, `PORT`, `LOG_LEVEL`, `ALLOWED_ORIGINS`.
+
+Variáveis exportadas no terminal têm prioridade sobre as do `.env`.
 
 ### 4. Configure o frontend React
 ```bash
@@ -78,6 +85,8 @@ npm start
 
 ## 🧪 Testes
 
+Requer as dependências de desenvolvimento (`pip install -r requirements-dev.txt`).
+
 ```bash
 # Todos os testes (configuração em pytest.ini)
 pytest
@@ -100,8 +109,14 @@ do editor usam a mesma configuração.
 ```bash
 ruff check .       # lint
 ruff format .      # formatação
-basedpyright       # tipos (pip install basedpyright)
+basedpyright       # tipos
 ```
+
+### Integração contínua
+
+A cada push na `main` e em cada pull request, o GitHub Actions
+(`.github/workflows/ci.yml`) roda o lint, a formatação, a checagem de tipos e os
+testes do backend, e os testes e o build do frontend.
 
 ## 📊 Casos de Teste
 
@@ -144,7 +159,19 @@ curl -X POST "http://localhost:8000/chat" \
 - `GET /examples` - exemplos de consultas
 
 Para manter contexto entre mensagens, reenvie o `session_id` retornado na
-resposta anterior (o `POST /chat` aceita `session_id` no corpo).
+resposta anterior (o `POST /chat` aceita `session_id` no corpo, com até 64 caracteres).
+A API guarda até 100 sessões em memória; ao passar disso, descarta as de atividade
+mais antiga. Sessões sem uso por 24 horas também são descartadas.
+
+### Erros
+
+Todos os erros têm o mesmo formato:
+
+```json
+{"error": "Sessão não encontrada", "status_code": 404, "timestamp": "2026-11-15T12:00:00+00:00"}
+```
+
+Erros de validação (422) trazem também `details`, com o campo e o motivo.
 
 ## 📁 Estrutura do Projeto
 

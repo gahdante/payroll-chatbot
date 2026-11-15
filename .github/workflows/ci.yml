@@ -1,0 +1,77 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    name: Backend (Python ${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # A versão mínima do README e a mais recente.
+        python-version: ["3.11", "3.14"]
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            requirements-dev.txt
+
+      # O basedpyright procura o ambiente em ./venv (pyproject.toml).
+      - name: Instalar dependências
+        run: |
+          python -m venv venv
+          venv/bin/pip install -r requirements-dev.txt
+          echo "$PWD/venv/bin" >> "$GITHUB_PATH"
+
+      - name: Lint (ruff)
+        run: ruff check .
+
+      - name: Formatação (ruff)
+        run: ruff format --check .
+
+      - name: Tipos (basedpyright)
+        run: basedpyright
+
+      - name: Testes (pytest)
+        run: pytest --cov=app --cov-report=term-missing
+
+  frontend:
+    name: Frontend
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Instalar dependências
+        run: npm ci
+
+      - name: Testes
+        run: npm test -- --watchAll=false
+
+      # No CI (CI=true), avisos do ESLint fazem o build falhar.
+      - name: Build
+        run: npm run build

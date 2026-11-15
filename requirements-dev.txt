@@ -1,0 +1,8 @@
+# Dependências de desenvolvimento: testes, lint e checagem de tipos.
+-r requirements.txt
+pytest>=7.4.0
+pytest-asyncio>=0.23.0
+pytest-cov>=4.1.0
+pandas-stubs>=2.0.0
+ruff>=0.6.0
+basedpyright>=1.20.0

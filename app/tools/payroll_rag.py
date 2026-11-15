@@ -188,10 +188,10 @@ class PayrollRAG:
         self.df = pd.DataFrame()
         self._full_names: list[tuple[Pattern[str], str]] = []
         self._name_tokens: list[tuple[Pattern[str], set[str]]] = []
-        self._ensure_loaded()
+        self.ensure_loaded()
 
     # ----------------------------------------------------------------- loading
-    def _ensure_loaded(self) -> None:
+    def ensure_loaded(self) -> None:
         if not self.df.empty:
             return
         try:
@@ -244,8 +244,8 @@ class PayrollRAG:
         if not hits:
             return []
         # "Ana Maria" com duas Anas: a interseção desempata.
-        common = set.intersection(*hits)
-        return sorted(common or set.union(*hits))
+        common = hits[0].intersection(*hits[1:])
+        return sorted(common or hits[0].union(*hits[1:]))
 
     def _extract_employee_name(self, query: str) -> str | None:
         matches = self._match_employees(query)
@@ -368,7 +368,7 @@ class PayrollRAG:
 
     # ------------------------------------------------------------------ output
     def _build_evidence(self, rows: pd.DataFrame, query_type: str) -> dict[str, Any]:
-        sources = []
+        sources: list[dict[str, Any]] = []
         for _, r in rows.iterrows():
             sources.append({
                 "employee_id": str(r["employee_id"]),
@@ -410,7 +410,7 @@ class PayrollRAG:
         resultado traz ``params`` para alimentar o próximo turno.
         """
         try:
-            self._ensure_loaded()
+            self.ensure_loaded()
             if self.df.empty:
                 return self._fail("Não consegui carregar os dados da folha de pagamento.")
             if not query or not query.strip():
@@ -526,8 +526,9 @@ class PayrollRAG:
             who = f" para {name}" if name else ""
             return self._fail(f"Nenhum registro encontrado{who} em {self._period_label(scope)}.")
 
-        target = rows[m.column].max() if is_max else rows[m.column].min()
-        hits = rows[rows[m.column] == target].sort_values(["competency", "name"])
+        values = rows[m.column]
+        target = float(values.max() if is_max else values.min())
+        hits = rows.loc[values == target].sort_values(["competency", "name"])
         comps = [f"{format_competency(str(c))} ({c})" for c in hits["competency"]]
         if name:
             where = (f"na competência {comps[0]}" if len(comps) == 1

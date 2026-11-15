@@ -6,12 +6,12 @@ from app.utils.formatting import format_currency, format_date
 
 
 @pytest.fixture
-def rag(payroll_csv) -> PayrollRAG:
+def rag(payroll_csv: str) -> PayrollRAG:
     return PayrollRAG(payroll_csv)
 
 
 @pytest.mark.asyncio
-async def test_case_1_ana_souza_maio_2025(rag):
+async def test_case_1_ana_souza_maio_2025(rag: PayrollRAG):
     """"Quanto recebi (líquido) em maio/2025? (Ana Souza)" -> R$ 8.418,75 / E001, 2025-05."""
     r = await rag.query("Quanto recebi (líquido) em maio/2025? (Ana Souza)")
 
@@ -26,7 +26,7 @@ async def test_case_1_ana_souza_maio_2025(rag):
 
 
 @pytest.mark.asyncio
-async def test_case_2_ana_souza_q1_total(rag):
+async def test_case_2_ana_souza_q1_total(rag: PayrollRAG):
     """"Total líquido de Ana Souza no 1º trimestre de 2025" -> R$ 23.221,25 / E001, 2025-01..03."""
     r = await rag.query("Qual o total líquido de Ana Souza no 1º trimestre de 2025?")
 
@@ -40,7 +40,7 @@ async def test_case_2_ana_souza_q1_total(rag):
 
 
 @pytest.mark.asyncio
-async def test_case_3_bruno_inss_junho(rag):
+async def test_case_3_bruno_inss_junho(rag: PayrollRAG):
     """"Desconto de INSS do Bruno em jun/2025" -> R$ 660,00 / E002, 2025-06."""
     r = await rag.query("Qual foi o desconto de INSS do Bruno em jun/2025?")
 
@@ -52,7 +52,7 @@ async def test_case_3_bruno_inss_junho(rag):
 
 
 @pytest.mark.asyncio
-async def test_case_4_bruno_abril_pagamento(rag):
+async def test_case_4_bruno_abril_pagamento(rag: PayrollRAG):
     """"Quando foi pago abril/2025 do Bruno e qual o líquido" -> 28/04/2025 e R$ 5.756,25."""
     r = await rag.query("Quando foi pago o salário de abril/2025 do Bruno e qual o líquido?")
 
@@ -63,7 +63,7 @@ async def test_case_4_bruno_abril_pagamento(rag):
 
 
 @pytest.mark.asyncio
-async def test_case_5_bruno_maior_bonus(rag):
+async def test_case_5_bruno_maior_bonus(rag: PayrollRAG):
     """"Maior bônus do Bruno e em que mês" -> R$ 1.200,00 em 2025-05 / E002, 2025-05."""
     r = await rag.query("Qual foi o maior bônus do Bruno e em que mês?")
 
@@ -75,20 +75,20 @@ async def test_case_5_bruno_maior_bonus(rag):
 
 
 @pytest.mark.asyncio
-async def test_error_unknown_employee(rag):
+async def test_error_unknown_employee(rag: PayrollRAG):
     r = await rag.query("Qual é o salário do João Inexistente?")
     assert r["success"] is False
     assert "não encontrado" in r["data"].lower()
 
 
 @pytest.mark.asyncio
-async def test_error_unknown_competency(rag):
+async def test_error_unknown_competency(rag: PayrollRAG):
     r = await rag.query("Qual é o salário em dezembro/2025?")
     assert r["success"] is False
     assert "encontrado" in r["data"].lower()
 
 
 @pytest.mark.asyncio
-async def test_error_empty_query(rag):
+async def test_error_empty_query(rag: PayrollRAG):
     r = await rag.query("")
     assert r["success"] is False

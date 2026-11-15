@@ -20,7 +20,7 @@ def payroll_csv() -> str:
 
 
 @pytest.fixture(autouse=True)
-def _offline_web_search(monkeypatch):
+def _offline_web_search(monkeypatch: pytest.MonkeyPatch):
     """Nenhum teste chama serviços externos.
 
     Um ``WebSearch`` sem transporte injetado recebe um que sempre falha, e o

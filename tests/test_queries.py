@@ -10,33 +10,33 @@ from app.utils.models import ChatRequest, ChatResponse
 
 
 @pytest.fixture
-def rag(payroll_csv) -> PayrollRAG:
+def rag(payroll_csv: str) -> PayrollRAG:
     return PayrollRAG(payroll_csv)
 
 
 class TestExtraction:
-    def test_employee_name(self, rag):
+    def test_employee_name(self, rag: PayrollRAG):
         assert rag._extract_employee_name("Qual é o salário do Ana Souza?") == "Ana Souza"
         assert rag._extract_employee_name("Quanto recebi? (Ana Souza)") == "Ana Souza"
         assert rag._extract_employee_name("Bruno Lima recebeu quanto?") == "Bruno Lima"
         assert rag._extract_employee_name("Bruno em jun/2025") == "Bruno Lima"
         assert rag._extract_employee_name("Qual o salário médio?") is None
 
-    def test_competency(self, rag):
+    def test_competency(self, rag: PayrollRAG):
         assert rag._extract_competency("Quanto recebi em maio/2025?") == "2025-05"
         assert rag._extract_competency("Qual o salário em 2025-05?") == "2025-05"
         assert rag._extract_competency("Bruno em jun/2025") == "2025-06"
         assert rag._extract_competency("05/2025") == "2025-05"
         assert rag._extract_competency("Qual o salário médio?") is None
 
-    def test_period(self, rag):
+    def test_period(self, rag: PayrollRAG):
         assert rag._extract_period("1º trimestre de 2025") == ["2025-01", "2025-02", "2025-03"]
         assert rag._extract_period("primeiro trimestre de 2025") == ["2025-01", "2025-02", "2025-03"]
         assert rag._extract_period("2º trimestre de 2025") == ["2025-04", "2025-05", "2025-06"]
         assert rag._extract_period("1º semestre de 2025") == [f"2025-{m:02d}" for m in range(1, 7)]
         assert rag._extract_period("salário de maio") is None
 
-    def test_metric(self, rag):
+    def test_metric(self, rag: PayrollRAG):
         assert rag._detect_metric("desconto de INSS") == "inss"
         assert rag._detect_metric("desconto de IRRF") == "irrf"
         assert rag._detect_metric("maior bônus") == "bonus"
@@ -46,26 +46,26 @@ class TestExtraction:
 
 class TestRagQueries:
     @pytest.mark.asyncio
-    async def test_competency_listing(self, rag):
+    async def test_competency_listing(self, rag: PayrollRAG):
         r = await rag.query("Qual a folha de maio/2025?")
         assert r["success"] is True
         assert "Ana Souza" in r["data"] and "Bruno Lima" in r["data"]
         assert r["evidence"]["total_records"] == 2
 
     @pytest.mark.asyncio
-    async def test_global_average(self, rag):
+    async def test_global_average(self, rag: PayrollRAG):
         r = await rag.query("Qual é o salário médio?")
         assert r["success"] is True
         assert "média" in r["data"].lower()
 
     @pytest.mark.asyncio
-    async def test_employee_quarter_total(self, rag):
+    async def test_employee_quarter_total(self, rag: PayrollRAG):
         r = await rag.query("Qual é o total líquido de Ana Souza no 1º trimestre?")
         assert r["success"] is True
         assert format_currency(23221.25) in r["data"]
 
     @pytest.mark.asyncio
-    async def test_irrf_single_record(self, rag):
+    async def test_irrf_single_record(self, rag: PayrollRAG):
         r = await rag.query("Qual foi o desconto de IRRF da Ana em maio/2025?")
         assert r["success"] is True
         assert "IRRF" in r["data"]
@@ -147,7 +147,7 @@ class TestAgent:
         assert "fgts" in result["response"].lower()
 
     @pytest.mark.asyncio
-    async def test_session_persists_across_turns(self, monkeypatch):
+    async def test_session_persists_across_turns(self, monkeypatch: pytest.MonkeyPatch):
         from app.core.agent import PayrollAgent
 
         agent = PayrollAgent()

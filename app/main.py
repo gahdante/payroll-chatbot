@@ -4,7 +4,7 @@ import os
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 
-from fastapi import Depends, FastAPI, HTTPException
+from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
@@ -18,7 +18,7 @@ _state: dict[str, PayrollAgent | None] = {"agent": None}
 
 
 @asynccontextmanager
-async def lifespan(app: FastAPI):
+async def lifespan(_app: FastAPI):
     logger.info("Inicializando o chatbot de folha de pagamento...")
     _state["agent"] = PayrollAgent()
     logger.info("Agente pronto.")
@@ -66,7 +66,7 @@ async def root():
 
 @app.get("/health", response_model=HealthCheck)
 async def health_check(agent: PayrollAgent = Depends(get_agent)):
-    agent.rag._ensure_loaded()
+    agent.rag.ensure_loaded()
     dependencies = {
         "rag": "ok" if not agent.rag.df.empty else "sem dados",
         "llm": "ok" if agent.llm.api_key else "sem OPENAI_API_KEY",
@@ -144,7 +144,7 @@ async def examples():
 
 
 @app.exception_handler(HTTPException)
-async def http_exception_handler(request, exc: HTTPException):
+async def http_exception_handler(_request: Request, exc: HTTPException):
     return JSONResponse(
         status_code=exc.status_code,
         content={
@@ -156,7 +156,7 @@ async def http_exception_handler(request, exc: HTTPException):
 
 
 @app.exception_handler(Exception)
-async def unhandled_exception_handler(request, exc: Exception):
+async def unhandled_exception_handler(_request: Request, exc: Exception):
     logger.exception("Erro não tratado: %s", exc)
     return JSONResponse(
         status_code=500,

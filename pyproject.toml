@@ -23,3 +23,9 @@ reportUnusedCallResult = false             # ex.: ignorar o bool de memory.add_m
 reportImplicitStringConcatenation = false  # "texto " "longo" em várias linhas
 reportUnannotatedClassAttribute = false    # exige anotar cada self.x = ...
 reportCallInDefaultInitializer = false     # Depends(...) do FastAPI
+
+# Os testes podem exercitar funções internas (_extract_*, _route...).
+[[tool.basedpyright.executionEnvironments]]
+root = "tests"
+extraPaths = ["."]
+reportPrivateUsage = false

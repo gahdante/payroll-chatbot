@@ -223,7 +223,7 @@ class ConversationMemory:
         session = self.sessions[session_id]
         
         # Analisa mensagens para extrair contexto
-        context_summary = {
+        context_summary: dict[str, Any] = {
             "session_id": session_id,
             "total_messages": len(session.messages),
             "last_activity": session.last_activity.isoformat(),
@@ -235,11 +235,15 @@ class ConversationMemory:
         }
         
         # Funcionários e competências saem das evidências do RAG, não de texto livre.
-        tools_used, topics, employees, competencies = set(), set(), set(), set()
+        tools_used: set[str] = set()
+        topics: set[str] = set()
+        employees: set[str] = set()
+        competencies: set[str] = set()
         for message in session.messages:
             if message.tool_used:
                 tools_used.add(message.tool_used)
-            for source in (message.evidence or {}).get("sources") or []:
+            sources: list[dict[str, Any]] = (message.evidence or {}).get("sources") or []
+            for source in sources:
                 if source.get("name"):
                     employees.add(source["name"])
                 if source.get("competency"):
@@ -299,7 +303,7 @@ class ConversationMemory:
     def _cleanup_expired_sessions(self):
         """Remove sessões expiradas"""
         now = datetime.now(UTC)
-        expired_sessions = []
+        expired_sessions: list[str] = []
         
         for session_id, session in self.sessions.items():
             if now - session.last_activity > self.session_timeout:

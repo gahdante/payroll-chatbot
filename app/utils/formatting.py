@@ -11,7 +11,7 @@ _CENT = Decimal("0.01")
 _THOUSANDS_ONLY = re.compile(r"\d{1,3}(?:\.\d{3})+")
 
 
-def _parse_decimal(value: str) -> Decimal | None:
+def _parse_decimal(value: str | None) -> Decimal | None:
     """Lê um valor monetário em texto ("R$ 1.500,50", "1500.50", "-10")."""
     cleaned = re.sub(r"[^\d,.-]", "", value or "")
     negative = cleaned.startswith("-")
@@ -53,14 +53,14 @@ def format_currency(value: float | str | Decimal) -> str:
     return f"{sign}R$ {formatted}"
 
 
-def parse_currency(value: str) -> float | None:
+def parse_currency(value: str | None) -> float | None:
     """
     Converte string de moeda para float ("R$ 1.500,50" -> 1500.5, "1.500" -> 1500.0).
 
     Returns:
         Float com o valor ou None se inválido
     """
-    amount = _parse_decimal(value) if isinstance(value, str) else None
+    amount = _parse_decimal(value)
     return float(amount) if amount is not None else None
 
 def format_date(date_input: str | datetime) -> str:
@@ -93,10 +93,7 @@ def format_date(date_input: str | datetime) -> str:
             # Se nenhum formato funcionou, retorna como está
             return date_input
             
-        elif isinstance(date_input, datetime):
-            return date_input.strftime('%d/%m/%Y')
-        else:
-            return str(date_input)
+        return date_input.strftime('%d/%m/%Y')
             
     except (ValueError, TypeError, AttributeError):
         return "Data inválida"

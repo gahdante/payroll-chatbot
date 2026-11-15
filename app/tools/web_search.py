@@ -12,13 +12,16 @@ import logging
 import os
 from datetime import date, timedelta
 from decimal import Decimal
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 import httpx
 
 from ..utils.text import contains_any
 
 logger = logging.getLogger(__name__)
+
+# Rede/status HTTP, JSON inválido, resposta sem o formato esperado, valor não numérico.
+_BCB_ERRORS = (httpx.HTTPError, ValueError, KeyError, IndexError, TypeError, ArithmeticError)
 
 _FALLBACK_NOTE = (
     "Resposta baseada em uma base de referência local e que pode estar desatualizada. "
@@ -78,7 +81,7 @@ class WebSearch:
     BCB_SELIC_SERIES = "https://api.bcb.gov.br/dados/serie/bcdata.sgs.432/dados"
     BCB_SELIC_PAGE = "https://www.bcb.gov.br/controleinflacao/taxaselic"
 
-    def __init__(self, transport: Optional[httpx.AsyncBaseTransport] = None) -> None:
+    def __init__(self, transport: httpx.AsyncBaseTransport | None = None) -> None:
         self.api_key = os.getenv("GOOGLE_API_KEY")
         self.search_engine_id = os.getenv("GOOGLE_SEARCH_ENGINE_ID")
         self.use_fallback = not (self.api_key and self.search_engine_id)
@@ -89,16 +92,16 @@ class WebSearch:
     def _client(self) -> httpx.AsyncClient:
         return httpx.AsyncClient(timeout=10.0, transport=self._transport)
 
-    async def search(self, query: str) -> Dict[str, Any]:
+    async def search(self, query: str) -> dict[str, Any]:
         if self.use_fallback:
             return self._reference_search(query)
         try:
             return await self._google_search(query)
-        except Exception as exc:
+        except (httpx.HTTPError, ValueError) as exc:  # rede, status HTTP ou JSON inválido
             logger.warning("Busca Google falhou (%s); usando base de referência.", exc)
             return self._reference_search(query)
 
-    async def _google_search(self, query: str) -> Dict[str, Any]:
+    async def _google_search(self, query: str) -> dict[str, Any]:
         params = {
             "key": self.api_key,
             "cx": self.search_engine_id,
@@ -121,12 +124,12 @@ class WebSearch:
         ]
         return {"success": bool(results), "results": results, "query": query, "fallback": False}
 
-    def _reference_search(self, query: str) -> Dict[str, Any]:
+    def _reference_search(self, query: str) -> dict[str, Any]:
         q = query.lower()
         chosen = next((entry for keys, entry in _REFERENCE if any(k in q for k in keys)), _CLT_ENTRY)
         return {"success": True, "results": [chosen], "query": query, "fallback": True}
 
-    async def _selic_bcb(self, today: Optional[date] = None) -> Dict[str, Any]:
+    async def _selic_bcb(self, today: date | None = None) -> dict[str, Any]:
         """Meta Selic vigente, direto da série 432 do SGS/Banco Central.
 
         Consulta por intervalo até hoje: ``ultimos/1`` devolve a data da próxima
@@ -160,20 +163,15 @@ class WebSearch:
         }
         return {"success": True, "data": data, "evidence": evidence}
 
-    async def search_with_citation(self, query: str) -> Dict[str, Any]:
+    async def search_with_citation(self, query: str) -> dict[str, Any]:
         if contains_any(query, ("selic",)):
             try:
                 return await self._selic_bcb()
-            except Exception as exc:
+            except _BCB_ERRORS as exc:
                 logger.warning("Consulta da Selic no BCB falhou (%s); seguindo com a busca.", exc)
 
-        try:
-            result = await self.search(query)
-        except Exception as exc:
-            logger.error("Erro na busca web: %s", exc)
-            return {"success": False, "data": "Não foi possível realizar a busca na web.", "evidence": None}
-
-        results: List[Dict[str, Any]] = result.get("results", [])
+        result = await self.search(query)  # já cai na base local se a busca falhar
+        results: list[dict[str, Any]] = result.get("results", [])
         if not result.get("success") or not results:
             return {"success": False, "data": "Nenhum resultado encontrado na busca.", "evidence": None}
 
@@ -193,7 +191,7 @@ class WebSearch:
             ],
             "query_type": "web",
         }
-        out: Dict[str, Any] = {"success": True, "data": data, "evidence": evidence}
+        out: dict[str, Any] = {"success": True, "data": data, "evidence": evidence}
         if result.get("fallback"):
             out["note"] = _FALLBACK_NOTE
         return out

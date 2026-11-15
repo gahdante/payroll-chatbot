@@ -1,7 +1,6 @@
 """Configuração e chamada do LLM (OpenAI)."""
 import logging
 import os
-from typing import Dict, List, Optional
 
 from dotenv import load_dotenv
 from openai import AsyncOpenAI
@@ -47,10 +46,10 @@ class LLMConfig:
     async def generate_response(
         self,
         message: str,
-        history: Optional[List[Dict[str, str]]] = None,
+        history: list[dict[str, str]] | None = None,
     ) -> str:
         """Gera uma resposta conversacional, opcionalmente com histórico recente."""
-        messages: List[ChatCompletionMessageParam] = [
+        messages: list[ChatCompletionMessageParam] = [
             {"role": "system", "content": self.get_system_prompt()}
         ]
         for turn in history or []:

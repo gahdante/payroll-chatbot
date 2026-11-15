@@ -1,13 +1,15 @@
 """Agente que roteia entre RAG (folha), busca web e conversa geral."""
 import logging
 import re
-from typing import Any, Dict, Optional, Tuple
+from typing import Any
 
-from .conversation_memory import ConversationMemory
-from .llm import LLMConfig
+from openai import OpenAIError
+
 from ..tools.payroll_rag import PayrollRAG, QueryParams
 from ..tools.web_search import WebSearch
 from ..utils.text import contains_any, normalize
+from .conversation_memory import ConversationMemory
+from .llm import LLMConfig
 
 logger = logging.getLogger(__name__)
 
@@ -45,7 +47,7 @@ class PayrollAgent:
             len(message.split()) <= _FOLLOW_UP_MAX_WORDS
         )
 
-    def _route(self, message: str, has_payroll_context: bool = False) -> Tuple[str, bool]:
+    def _route(self, message: str, has_payroll_context: bool = False) -> tuple[str, bool]:
         """Ferramenta que atende a mensagem e se ela continua a consulta anterior."""
         params: QueryParams = self.rag.parse(message)
         web = contains_any(message, _WEB_TERMS)
@@ -63,7 +65,7 @@ class PayrollAgent:
             return "rag", False
         return "general", False
 
-    async def process_query(self, message: str, session_id: Optional[str] = None) -> Dict[str, Any]:
+    async def process_query(self, message: str, session_id: str | None = None) -> dict[str, Any]:
         if not session_id or session_id not in self.memory.sessions:
             session_id = self.memory.create_session(session_id)
         # Um "Obrigado!" no meio não quebra o fio da consulta; uma busca web, sim.
@@ -74,7 +76,7 @@ class PayrollAgent:
         )
         self.memory.add_message(session_id, "user", message)
 
-        result: Dict[str, Any]
+        result: dict[str, Any]
         try:
             kind, follow_up = self._route(message, has_payroll_context)
             if kind == "rag":
@@ -86,8 +88,8 @@ class PayrollAgent:
                 result = await self._handle_web(message)
             else:
                 result = await self._handle_general(message, session_id)
-        except Exception as exc:
-            logger.error("Erro ao processar consulta: %s", exc)
+        except Exception:  # última barreira: o usuário sempre recebe uma resposta
+            logger.exception("Erro ao processar consulta")
             result = {
                 "response": "Desculpe, tive um problema para processar sua mensagem. "
                             "Pode tentar de novo em instantes?",
@@ -107,7 +109,7 @@ class PayrollAgent:
             "session_id": session_id,
         }
 
-    async def _handle_rag(self, message: str, context: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    async def _handle_rag(self, message: str, context: dict[str, Any] | None = None) -> dict[str, Any]:
         rag = await self.rag.query(message, context=context)
         return {
             "response": rag["data"],
@@ -116,19 +118,19 @@ class PayrollAgent:
             "params": rag.get("params"),
         }
 
-    async def _handle_web(self, message: str) -> Dict[str, Any]:
+    async def _handle_web(self, message: str) -> dict[str, Any]:
         web = await self.web_search.search_with_citation(message)
         text = web["data"]
         if web.get("note"):
             text = f"{text}\n\n({web['note']})"
         return {"response": text, "evidence": web.get("evidence"), "tool_used": "web"}
 
-    async def _handle_general(self, message: str, session_id: str) -> Dict[str, Any]:
+    async def _handle_general(self, message: str, session_id: str) -> dict[str, Any]:
         history = self.memory.get_history_for_llm(session_id)
         try:
             answer = await self.llm.generate_response(message, history=history)
-        except Exception as exc:
-            logger.error("Falha no LLM (conversa geral): %s", exc)
+        except OpenAIError as exc:
+            logger.warning("Falha no LLM (conversa geral): %s", exc)
             answer = (
                 "Posso ajudar com consultas de folha de pagamento (valores, descontos, "
                 "competências) e dúvidas de legislação trabalhista. O que você precisa?"
@@ -136,10 +138,10 @@ class PayrollAgent:
         return {"response": answer, "evidence": None, "tool_used": "general"}
 
     # helpers usados pela API -------------------------------------------------
-    def get_session_stats(self) -> Dict[str, Any]:
+    def get_session_stats(self) -> dict[str, Any]:
         return self.memory.get_session_stats()
 
-    def get_context_summary(self, session_id: str) -> Dict[str, Any]:
+    def get_context_summary(self, session_id: str) -> dict[str, Any]:
         return self.memory.get_context_summary(session_id)
 
     def delete_session(self, session_id: str) -> bool:

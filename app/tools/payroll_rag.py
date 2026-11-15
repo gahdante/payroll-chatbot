@@ -13,7 +13,8 @@ import logging
 import re
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, NamedTuple, Optional, Pattern, Set, Tuple
+from re import Pattern
+from typing import Any, NamedTuple
 
 import pandas as pd
 
@@ -64,7 +65,7 @@ _MIN_TERMS = ("menor", "mais baixo", "mais baixa", "minimo", "minima")
 _NAME_STOPWORDS = {"da", "de", "do", "das", "dos", "e"}
 
 # Ordem importa: "desconto de INSS" é INSS, não descontos em geral.
-_METRIC_TERMS: List[Tuple[str, Tuple[str, ...]]] = [
+_METRIC_TERMS: list[tuple[str, tuple[str, ...]]] = [
     ("inss", ("inss",)),
     ("irrf", ("irrf", "imposto de renda")),
     ("bonus", ("bonus", "bonificacao")),
@@ -87,7 +88,7 @@ class _Metric(NamedTuple):
     total: str  # "Total de INSS"
 
 
-_METRICS: Dict[str, _Metric] = {
+_METRICS: dict[str, _Metric] = {
     "net_pay": _Metric("net_pay", "líquido", "salário líquido", "Total líquido"),
     "base_salary": _Metric("base_salary", "salário base", "salário base", "Total de salário base"),
     "bonus": _Metric("bonus", "bônus", "bônus", "Total de bônus"),
@@ -99,7 +100,7 @@ _METRICS: Dict[str, _Metric] = {
 }
 
 # Linhas extras do registro mensal, além de líquido e data (sempre exibidos).
-_RECORD_FIELDS: Dict[str, List[Tuple[str, str]]] = {
+_RECORD_FIELDS: dict[str, list[tuple[str, str]]] = {
     "inss": [("Desconto de INSS", "deductions_inss")],
     "irrf": [("Desconto de IRRF", "deductions_irrf")],
     "bonus": [("Bônus", "bonus")],
@@ -131,14 +132,14 @@ class PeriodError(ValueError):
 class QueryParams:
     """O que foi entendido de uma pergunta sobre a folha."""
 
-    name: Optional[str] = None
-    candidates: List[str] = field(default_factory=list)  # mais de um funcionário casou
-    competency: Optional[str] = None  # "2025-05"
+    name: str | None = None
+    candidates: list[str] = field(default_factory=list)  # mais de um funcionário casou
+    competency: str | None = None  # "2025-05"
     year_inferred: bool = False  # competência veio sem ano ("em junho")
-    period: Optional[List[str]] = None  # competências de um trimestre/semestre/ano
-    period_error: Optional[str] = None
-    metric: Optional[str] = None  # chave de _METRIC_TERMS; None = não citada
-    extreme: Optional[str] = None  # "max" | "min"
+    period: list[str] | None = None  # competências de um trimestre/semestre/ano
+    period_error: str | None = None
+    metric: str | None = None  # chave de _METRIC_TERMS; None = não citada
+    extreme: str | None = None  # "max" | "min"
     aggregate: bool = False
 
     def has_signal(self) -> bool:
@@ -148,7 +149,7 @@ class QueryParams:
             or self.period_error or self.metric or self.extreme or self.aggregate
         )
 
-    def follow_up_of(self, prev: "QueryParams") -> "QueryParams":
+    def follow_up_of(self, prev: QueryParams) -> QueryParams:
         """Completa uma pergunta de seguimento ("E em junho?") com o turno anterior.
 
         O que a nova pergunta diz explicitamente prevalece; o resto vem de ``prev``.
@@ -173,7 +174,7 @@ class QueryParams:
         )
 
 
-def _join_pt(items: List[str]) -> str:
+def _join_pt(items: list[str]) -> str:
     if len(items) <= 1:
         return "".join(items)
     return f"{', '.join(items[:-1])} e {items[-1]}"
@@ -182,11 +183,11 @@ def _join_pt(items: List[str]) -> str:
 class PayrollRAG:
     """Consultas sobre a folha de pagamento a partir de um CSV."""
 
-    def __init__(self, csv_path: "str | Path | None" = None) -> None:
+    def __init__(self, csv_path: str | Path | None = None) -> None:
         self.csv_path = Path(csv_path) if csv_path else _DEFAULT_CSV
         self.df = pd.DataFrame()
-        self._full_names: List[Tuple[Pattern[str], str]] = []
-        self._name_tokens: List[Tuple[Pattern[str], Set[str]]] = []
+        self._full_names: list[tuple[Pattern[str], str]] = []
+        self._name_tokens: list[tuple[Pattern[str], set[str]]] = []
         self._ensure_loaded()
 
     # ----------------------------------------------------------------- loading
@@ -203,13 +204,13 @@ class PayrollRAG:
             self.df = df
             self._build_name_lookup()
             logger.info("Folha carregada: %d registros de %s", len(df), self.csv_path)
-        except Exception as exc:  # pragma: no cover - depende de I/O
+        except (OSError, ValueError, KeyError) as exc:  # pragma: no cover - depende de I/O
             logger.error("Falha ao carregar %s: %s", self.csv_path, exc)
             self.df = pd.DataFrame()
 
     def _build_name_lookup(self) -> None:
-        full_names: List[Tuple[Pattern[str], str]] = []
-        tokens: Dict[str, Set[str]] = {}
+        full_names: list[tuple[Pattern[str], str]] = []
+        tokens: dict[str, set[str]] = {}
         for full in sorted(self.df["name"].dropna().astype(str).unique()):
             key = normalize(full).strip()
             full_names.append((re.compile(rf"\b{re.escape(key)}\b"), full))
@@ -226,14 +227,14 @@ class PayrollRAG:
             return 2025
         return int(self.df["competency"].str.slice(0, 4).astype(int).max())
 
-    def _latest_competency(self, year: Optional[int] = None) -> Optional[str]:
+    def _latest_competency(self, year: int | None = None) -> str | None:
         comps = self.df["competency"]
         if year:
             comps = comps[comps.str.startswith(f"{year}-")]
         return None if comps.empty else str(comps.max())
 
     # -------------------------------------------------------------- extraction
-    def _match_employees(self, query: str) -> List[str]:
+    def _match_employees(self, query: str) -> list[str]:
         """Funcionários citados na pergunta (mais de um = ambíguo)."""
         q = normalize(query)
         full_hits = {full for pattern, full in self._full_names if pattern.search(q)}
@@ -246,11 +247,11 @@ class PayrollRAG:
         common = set.intersection(*hits)
         return sorted(common or set.union(*hits))
 
-    def _extract_employee_name(self, query: str) -> Optional[str]:
+    def _extract_employee_name(self, query: str) -> str | None:
         matches = self._match_employees(query)
         return matches[0] if len(matches) == 1 else None
 
-    def _parse_competency(self, query: str) -> Tuple[Optional[str], bool]:
+    def _parse_competency(self, query: str) -> tuple[str | None, bool]:
         """Competência citada e se o ano foi inferido (mês sem ano)."""
         q = normalize(query)
         m = re.search(r"\b(20\d{2})-(\d{2})\b", q)
@@ -271,10 +272,10 @@ class PayrollRAG:
             return f"{self._default_year()}-{month:02d}", True
         return None, False
 
-    def _extract_competency(self, query: str) -> Optional[str]:
+    def _extract_competency(self, query: str) -> str | None:
         return self._parse_competency(query)[0]
 
-    def _extract_period(self, query: str) -> Optional[List[str]]:
+    def _extract_period(self, query: str) -> list[str] | None:
         """Competências do trimestre/semestre pedido; ``PeriodError`` se ambíguo."""
         q = normalize(query)
         year_match = _YEAR_RE.search(q)
@@ -310,7 +311,7 @@ class PayrollRAG:
         return [f"{year}-{month:02d}" for month in months]
 
     @staticmethod
-    def _detect_metric(query: str) -> Optional[str]:
+    def _detect_metric(query: str) -> str | None:
         for metric, terms in _METRIC_TERMS:
             if contains_any(query, terms):
                 return metric
@@ -347,12 +348,12 @@ class PayrollRAG:
 
     # ------------------------------------------------------------------ labels
     @staticmethod
-    def _metric(metric: Optional[str]) -> _Metric:
+    def _metric(metric: str | None) -> _Metric:
         # "full" e "payment_date" não têm valor único para somar/comparar: usa o líquido.
         return _METRICS.get(metric or "net_pay", _METRICS["net_pay"])
 
     @staticmethod
-    def _period_label(competencies: Optional[List[str]]) -> str:
+    def _period_label(competencies: list[str] | None) -> str:
         if not competencies:
             return "todo o período disponível"
         months = sorted(competencies)
@@ -366,7 +367,7 @@ class PayrollRAG:
         return f"{format_competency(months[0])} a {format_competency(months[-1])}"
 
     # ------------------------------------------------------------------ output
-    def _build_evidence(self, rows: pd.DataFrame, query_type: str) -> Dict[str, Any]:
+    def _build_evidence(self, rows: pd.DataFrame, query_type: str) -> dict[str, Any]:
         sources = []
         for _, r in rows.iterrows():
             sources.append({
@@ -392,17 +393,17 @@ class PayrollRAG:
         }
 
     @staticmethod
-    def _fail(message: str) -> Dict[str, Any]:
+    def _fail(message: str) -> dict[str, Any]:
         return {"success": False, "data": message, "evidence": None}
 
-    def _ok(self, data: str, rows: pd.DataFrame, query_type: str) -> Dict[str, Any]:
+    def _ok(self, data: str, rows: pd.DataFrame, query_type: str) -> dict[str, Any]:
         return {"success": True, "data": data, "evidence": self._build_evidence(rows, query_type)}
 
     def _rows_for(self, name: str) -> pd.DataFrame:
         return self.df[self.df["name"] == name]
 
     # ------------------------------------------------------------------- query
-    async def query(self, query: str, context: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    async def query(self, query: str, context: dict[str, Any] | None = None) -> dict[str, Any]:
         """Responde a pergunta. ``context`` são os ``params`` do turno anterior.
 
         Passe ``context`` só para perguntas de seguimento ("E em junho?"); o
@@ -425,7 +426,7 @@ class PayrollRAG:
             logger.exception("Erro ao processar consulta RAG")
             return self._fail("Erro ao consultar a folha de pagamento.")
 
-    def _answer(self, p: QueryParams) -> Dict[str, Any]:
+    def _answer(self, p: QueryParams) -> dict[str, Any]:
         if p.candidates:
             return self._fail(
                 f"Encontrei mais de um funcionário na consulta: {_join_pt(p.candidates)}. "
@@ -452,7 +453,7 @@ class PayrollRAG:
         )
 
     def _answer_single_record(self, name: str, competency: str,
-                              metric: Optional[str]) -> Dict[str, Any]:
+                              metric: str | None) -> dict[str, Any]:
         rows = self._rows_for(name)
         rows = rows[rows["competency"] == competency]
         if rows.empty:
@@ -467,8 +468,8 @@ class PayrollRAG:
         lines.append(f"• Data de pagamento: {format_date(str(r['payment_date']))}")
         return self._ok("\n".join(lines), rows, "single_record")
 
-    def _answer_employee_aggregate(self, name: str, period: Optional[List[str]],
-                                   metric: Optional[str]) -> Dict[str, Any]:
+    def _answer_employee_aggregate(self, name: str, period: list[str] | None,
+                                   metric: str | None) -> dict[str, Any]:
         m = self._metric(metric)
         label = self._period_label(period)
         rows = self._rows_for(name)
@@ -485,8 +486,8 @@ class PayrollRAG:
         )
         return self._ok(data, rows, "employee_aggregate")
 
-    def _answer_global_aggregate(self, period: Optional[List[str]],
-                                 metric: Optional[str]) -> Dict[str, Any]:
+    def _answer_global_aggregate(self, period: list[str] | None,
+                                 metric: str | None) -> dict[str, Any]:
         m = self._metric(metric)
         label = self._period_label(period)
         rows = self.df
@@ -502,7 +503,7 @@ class PayrollRAG:
         )
         return self._ok(data, rows, "global_aggregate")
 
-    def _answer_employee_listing(self, name: str, metric: Optional[str]) -> Dict[str, Any]:
+    def _answer_employee_listing(self, name: str, metric: str | None) -> dict[str, Any]:
         m = self._metric(metric)
         rows = self._rows_for(name).sort_values("competency")
         if rows.empty:
@@ -515,8 +516,8 @@ class PayrollRAG:
             )
         return self._ok("\n".join(lines), rows, "employee_listing")
 
-    def _answer_extreme(self, name: Optional[str], scope: Optional[List[str]],
-                        metric: Optional[str], is_max: bool) -> Dict[str, Any]:
+    def _answer_extreme(self, name: str | None, scope: list[str] | None,
+                        metric: str | None, is_max: bool) -> dict[str, Any]:
         m = self._metric(metric)
         rows = self._rows_for(name) if name else self.df
         if scope:
@@ -542,7 +543,7 @@ class PayrollRAG:
         data = f"{subject} foi de {format_currency(target)}, {where}."
         return self._ok(data, hits, "extreme")
 
-    def _answer_competency(self, competency: str, metric: Optional[str]) -> Dict[str, Any]:
+    def _answer_competency(self, competency: str, metric: str | None) -> dict[str, Any]:
         m = self._metric(metric)
         rows = self.df[self.df["competency"] == competency].sort_values("name")
         if rows.empty:

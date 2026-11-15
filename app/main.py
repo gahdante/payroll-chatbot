@@ -2,7 +2,7 @@
 import logging
 import os
 from contextlib import asynccontextmanager
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from fastapi import Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -84,8 +84,8 @@ async def health_check(agent: PayrollAgent = Depends(get_agent)):
 async def _run_chat(agent: PayrollAgent, message: str, session_id: "str | None") -> ChatResponse:
     try:
         result = await agent.process_query(message, session_id)
-    except Exception as exc:  # noqa: BLE001 - registrado e traduzido para 500 genérico
-        logger.exception("Erro no /chat: %s", exc)
+    except Exception:
+        logger.exception("Erro no /chat")
         raise HTTPException(status_code=500, detail="Erro interno ao processar a mensagem")
     return ChatResponse(
         response=result["response"],
@@ -150,7 +150,7 @@ async def http_exception_handler(request, exc: HTTPException):
         content={
             "error": exc.detail,
             "status_code": exc.status_code,
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
         },
     )
 
@@ -163,7 +163,7 @@ async def unhandled_exception_handler(request, exc: Exception):
         content={
             "error": "Erro interno do servidor",
             "status_code": 500,
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
         },
     )
 

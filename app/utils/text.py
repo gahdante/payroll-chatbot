@@ -1,8 +1,9 @@
 """Normalização de texto para casar termos sem depender de acentos ou caixa."""
 import re
 import unicodedata
-from functools import lru_cache
-from typing import Iterable, Pattern
+from collections.abc import Iterable
+from functools import cache
+from re import Pattern
 
 
 def normalize(text: str) -> str:
@@ -11,7 +12,7 @@ def normalize(text: str) -> str:
     return "".join(ch for ch in decomposed if not unicodedata.combining(ch))
 
 
-@lru_cache(maxsize=None)
+@cache
 def _terms_pattern(terms: tuple[str, ...]) -> Pattern[str]:
     alternatives = "|".join(
         re.escape(normalize(term)) for term in sorted(terms, key=len, reverse=True)

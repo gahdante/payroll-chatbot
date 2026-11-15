@@ -5,8 +5,8 @@ Implementa contexto entre turnos da conversa
 import logging
 import uuid
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
-from typing import Any, Dict, List, Optional
+from datetime import UTC, datetime, timedelta
+from typing import Any
 
 from ..utils.text import contains_any
 
@@ -28,10 +28,10 @@ class Message:
     role: str  # "user" ou "assistant"
     content: str
     timestamp: datetime
-    tool_used: Optional[str] = None
-    evidence: Optional[Dict[str, Any]] = None
+    tool_used: str | None = None
+    evidence: dict[str, Any] | None = None
     
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Converte para dicionário"""
         return {
             "role": self.role,
@@ -42,7 +42,7 @@ class Message:
         }
     
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> 'Message':
+    def from_dict(cls, data: dict[str, Any]) -> 'Message':
         """Cria a partir de dicionário"""
         return cls(
             role=data["role"],
@@ -56,12 +56,12 @@ class Message:
 class ConversationContext:
     """Representa o contexto de uma conversa"""
     session_id: str
-    messages: List[Message]
-    context_data: Dict[str, Any]
+    messages: list[Message]
+    context_data: dict[str, Any]
     last_activity: datetime
     created_at: datetime
     
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Converte para dicionário"""
         return {
             "session_id": self.session_id,
@@ -72,7 +72,7 @@ class ConversationContext:
         }
     
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> 'ConversationContext':
+    def from_dict(cls, data: dict[str, Any]) -> 'ConversationContext':
         """Cria a partir de dicionário"""
         return cls(
             session_id=data["session_id"],
@@ -95,10 +95,10 @@ class ConversationMemory:
         """
         self.max_sessions = max_sessions
         self.max_messages_per_session = max_messages_per_session
-        self.sessions: Dict[str, ConversationContext] = {}
+        self.sessions: dict[str, ConversationContext] = {}
         self.session_timeout = timedelta(hours=24)  # 24 horas de inatividade
     
-    def create_session(self, session_id: Optional[str] = None) -> str:
+    def create_session(self, session_id: str | None = None) -> str:
         """
         Cria uma nova sessão de conversa
         
@@ -119,8 +119,8 @@ class ConversationMemory:
             session_id=session_id,
             messages=[],
             context_data={},
-            last_activity=datetime.now(timezone.utc),
-            created_at=datetime.now(timezone.utc)
+            last_activity=datetime.now(UTC),
+            created_at=datetime.now(UTC)
         )
         
         self.sessions[session_id] = context
@@ -129,7 +129,7 @@ class ConversationMemory:
         return session_id
     
     def add_message(self, session_id: str, role: str, content: str, 
-                   tool_used: Optional[str] = None, evidence: Optional[Dict[str, Any]] = None) -> bool:
+                   tool_used: str | None = None, evidence: dict[str, Any] | None = None) -> bool:
         """
         Adiciona mensagem à sessão
         
@@ -151,7 +151,7 @@ class ConversationMemory:
         message = Message(
             role=role,
             content=content,
-            timestamp=datetime.now(timezone.utc),
+            timestamp=datetime.now(UTC),
             tool_used=tool_used,
             evidence=evidence
         )
@@ -159,7 +159,7 @@ class ConversationMemory:
         # Adiciona à sessão
         session = self.sessions[session_id]
         session.messages.append(message)
-        session.last_activity = datetime.now(timezone.utc)
+        session.last_activity = datetime.now(UTC)
         
         # Limita número de mensagens
         if len(session.messages) > self.max_messages_per_session:
@@ -168,7 +168,7 @@ class ConversationMemory:
         logger.debug(f"Mensagem adicionada à sessão {session_id}")
         return True
     
-    def get_conversation_history(self, session_id: str, max_messages: int = 10) -> List[Message]:
+    def get_conversation_history(self, session_id: str, max_messages: int = 10) -> list[Message]:
         """
         Obtém histórico da conversa
         
@@ -187,7 +187,7 @@ class ConversationMemory:
 
         return messages
 
-    def get_history_for_llm(self, session_id: str, max_messages: int = 8) -> List[Dict[str, str]]:
+    def get_history_for_llm(self, session_id: str, max_messages: int = 8) -> list[dict[str, str]]:
         """
         Histórico recente no formato do chat da OpenAI, sem a última mensagem
         (que é a que está sendo processada agora).
@@ -207,7 +207,7 @@ class ConversationMemory:
         """Remove uma sessão. Retorna True se ela existia."""
         return self.sessions.pop(session_id, None) is not None
 
-    def get_context_summary(self, session_id: str) -> Dict[str, Any]:
+    def get_context_summary(self, session_id: str) -> dict[str, Any]:
         """
         Obtém resumo do contexto da conversa
         
@@ -274,7 +274,7 @@ class ConversationMemory:
         
         session = self.sessions[session_id]
         session.context_data[key] = value
-        session.last_activity = datetime.now(timezone.utc)
+        session.last_activity = datetime.now(UTC)
         
         return True
     
@@ -298,7 +298,7 @@ class ConversationMemory:
     
     def _cleanup_expired_sessions(self):
         """Remove sessões expiradas"""
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         expired_sessions = []
         
         for session_id, session in self.sessions.items():
@@ -327,13 +327,13 @@ class ConversationMemory:
             del self.sessions[session_id]
             logger.info(f"Sessão antiga removida: {session_id}")
     
-    def get_session_stats(self) -> Dict[str, Any]:
+    def get_session_stats(self) -> dict[str, Any]:
         """Obtém estatísticas das sessões"""
         total_sessions = len(self.sessions)
         total_messages = sum(len(session.messages) for session in self.sessions.values())
         
         # Sessões ativas (últimas 1 hora)
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         active_sessions = sum(
             1 for session in self.sessions.values()
             if now - session.last_activity < timedelta(hours=1)
@@ -347,7 +347,7 @@ class ConversationMemory:
             "max_messages_per_session": self.max_messages_per_session
         }
     
-    def export_session(self, session_id: str) -> Optional[Dict[str, Any]]:
+    def export_session(self, session_id: str) -> dict[str, Any] | None:
         """
         Exporta dados da sessão
         
@@ -363,7 +363,7 @@ class ConversationMemory:
         session = self.sessions[session_id]
         return session.to_dict()
     
-    def import_session(self, session_data: Dict[str, Any]) -> bool:
+    def import_session(self, session_data: dict[str, Any]) -> bool:
         """
         Importa dados da sessão
         
@@ -378,6 +378,6 @@ class ConversationMemory:
             self.sessions[session.session_id] = session
             logger.info(f"Sessão importada: {session.session_id}")
             return True
-        except Exception as e:
+        except (KeyError, TypeError, ValueError) as e:
             logger.error(f"Erro ao importar sessão: {e}")
             return False

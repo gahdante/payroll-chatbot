@@ -5,14 +5,13 @@ Implementa formatação brasileira de moeda, datas e números
 import re
 from datetime import datetime
 from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
-from typing import Optional, Union
 
 _CENT = Decimal("0.01")
 # "1.500" ou "1.500.000": pontos como separador de milhar (padrão brasileiro).
 _THOUSANDS_ONLY = re.compile(r"\d{1,3}(?:\.\d{3})+")
 
 
-def _parse_decimal(value: str) -> Optional[Decimal]:
+def _parse_decimal(value: str) -> Decimal | None:
     """Lê um valor monetário em texto ("R$ 1.500,50", "1500.50", "-10")."""
     cleaned = re.sub(r"[^\d,.-]", "", value or "")
     negative = cleaned.startswith("-")
@@ -31,7 +30,7 @@ def _parse_decimal(value: str) -> Optional[Decimal]:
     return -amount if negative else amount
 
 
-def format_currency(value: Union[float, str, int, Decimal]) -> str:
+def format_currency(value: float | str | Decimal) -> str:
     """
     Formata valor em moeda brasileira (R$ 1.500,50; negativos como -R$ 10,00).
 
@@ -54,7 +53,7 @@ def format_currency(value: Union[float, str, int, Decimal]) -> str:
     return f"{sign}R$ {formatted}"
 
 
-def parse_currency(value: str) -> Optional[float]:
+def parse_currency(value: str) -> float | None:
     """
     Converte string de moeda para float ("R$ 1.500,50" -> 1500.5, "1.500" -> 1500.0).
 
@@ -64,7 +63,7 @@ def parse_currency(value: str) -> Optional[float]:
     amount = _parse_decimal(value) if isinstance(value, str) else None
     return float(amount) if amount is not None else None
 
-def format_date(date_input: Union[str, datetime]) -> str:
+def format_date(date_input: str | datetime) -> str:
     """
     Formata data para formato brasileiro (dd/mm/aaaa)
     
@@ -102,7 +101,7 @@ def format_date(date_input: Union[str, datetime]) -> str:
     except (ValueError, TypeError, AttributeError):
         return "Data inválida"
 
-def parse_date(date_str: str) -> Optional[str]:
+def parse_date(date_str: str) -> str | None:
     """
     Converte string de data para formato YYYY-MM-DD
     
@@ -174,7 +173,7 @@ def format_competency(competency: str) -> str:
     except (ValueError, TypeError, AttributeError):
         return competency
 
-def parse_competency(competency: str) -> Optional[str]:
+def parse_competency(competency: str) -> str | None:
     """
     Converte competência para formato YYYY-MM
     

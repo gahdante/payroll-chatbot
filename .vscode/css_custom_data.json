@@ -1,0 +1,21 @@
+{
+  "version": 1.1,
+  "atDirectives": [
+    {
+      "name": "@tailwind",
+      "description": "Diretiva do Tailwind: insere os estilos `base`, `components` ou `utilities`. Processada no build pelo PostCSS."
+    },
+    {
+      "name": "@apply",
+      "description": "Diretiva do Tailwind: aplica classes utilitárias dentro de uma regra CSS."
+    },
+    {
+      "name": "@layer",
+      "description": "Diretiva do Tailwind: coloca as regras na camada `base`, `components` ou `utilities`."
+    },
+    {
+      "name": "@config",
+      "description": "Diretiva do Tailwind: indica qual arquivo de configuração usar."
+    }
+  ]
+}

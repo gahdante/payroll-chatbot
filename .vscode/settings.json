@@ -1,0 +1,6 @@
+{
+  // Ensina ao verificador de CSS do VS Code as diretivas do Tailwind (@tailwind,
+  // @apply...), que o build processa. Sem isto, o frontend/src/index.css mostra
+  // o falso aviso "Unknown at rule @tailwind".
+  "css.customData": [".vscode/css_custom_data.json"]
+}

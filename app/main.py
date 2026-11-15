@@ -1,4 +1,5 @@
 """API FastAPI do chatbot de folha de pagamento."""
+
 import logging
 import os
 from contextlib import asynccontextmanager
@@ -38,9 +39,9 @@ app = FastAPI(
 
 _allowed_origins = [
     origin.strip()
-    for origin in os.getenv(
-        "ALLOWED_ORIGINS", "http://localhost:3000,http://localhost:5173"
-    ).split(",")
+    for origin in os.getenv("ALLOWED_ORIGINS", "http://localhost:3000,http://localhost:5173").split(
+        ","
+    )
     if origin.strip()
 ]
 app.add_middleware(

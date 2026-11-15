@@ -1,4 +1,5 @@
 """Casos do desafio técnico: valida os valores esperados na camada RAG."""
+
 import pytest
 
 from app.tools.payroll_rag import PayrollRAG
@@ -12,7 +13,7 @@ def rag(payroll_csv: str) -> PayrollRAG:
 
 @pytest.mark.asyncio
 async def test_case_1_ana_souza_maio_2025(rag: PayrollRAG):
-    """"Quanto recebi (líquido) em maio/2025? (Ana Souza)" -> R$ 8.418,75 / E001, 2025-05."""
+    """ "Quanto recebi (líquido) em maio/2025? (Ana Souza)" -> R$ 8.418,75 / E001, 2025-05."""
     r = await rag.query("Quanto recebi (líquido) em maio/2025? (Ana Souza)")
 
     assert r["success"] is True
@@ -27,7 +28,7 @@ async def test_case_1_ana_souza_maio_2025(rag: PayrollRAG):
 
 @pytest.mark.asyncio
 async def test_case_2_ana_souza_q1_total(rag: PayrollRAG):
-    """"Total líquido de Ana Souza no 1º trimestre de 2025" -> R$ 23.221,25 / E001, 2025-01..03."""
+    """ "Total líquido de Ana Souza no 1º trimestre de 2025" -> R$ 23.221,25 / E001, 2025-01..03."""
     r = await rag.query("Qual o total líquido de Ana Souza no 1º trimestre de 2025?")
 
     assert r["success"] is True
@@ -41,7 +42,7 @@ async def test_case_2_ana_souza_q1_total(rag: PayrollRAG):
 
 @pytest.mark.asyncio
 async def test_case_3_bruno_inss_junho(rag: PayrollRAG):
-    """"Desconto de INSS do Bruno em jun/2025" -> R$ 660,00 / E002, 2025-06."""
+    """ "Desconto de INSS do Bruno em jun/2025" -> R$ 660,00 / E002, 2025-06."""
     r = await rag.query("Qual foi o desconto de INSS do Bruno em jun/2025?")
 
     assert r["success"] is True
@@ -53,7 +54,7 @@ async def test_case_3_bruno_inss_junho(rag: PayrollRAG):
 
 @pytest.mark.asyncio
 async def test_case_4_bruno_abril_pagamento(rag: PayrollRAG):
-    """"Quando foi pago abril/2025 do Bruno e qual o líquido" -> 28/04/2025 e R$ 5.756,25."""
+    """ "Quando foi pago abril/2025 do Bruno e qual o líquido" -> 28/04/2025 e R$ 5.756,25."""
     r = await rag.query("Quando foi pago o salário de abril/2025 do Bruno e qual o líquido?")
 
     assert r["success"] is True
@@ -64,7 +65,7 @@ async def test_case_4_bruno_abril_pagamento(rag: PayrollRAG):
 
 @pytest.mark.asyncio
 async def test_case_5_bruno_maior_bonus(rag: PayrollRAG):
-    """"Maior bônus do Bruno e em que mês" -> R$ 1.200,00 em 2025-05 / E002, 2025-05."""
+    """ "Maior bônus do Bruno e em que mês" -> R$ 1.200,00 em 2025-05 / E002, 2025-05."""
     r = await rag.query("Qual foi o maior bônus do Bruno e em que mês?")
 
     assert r["success"] is True

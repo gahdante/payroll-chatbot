@@ -7,6 +7,7 @@ Cada pergunta vira um ``QueryParams`` (funcionário, competência, período,
 métrica, maior/menor, total). Perguntas de seguimento ("E em junho?") são
 completadas com os parâmetros do turno anterior via ``QueryParams.follow_up_of``.
 """
+
 from __future__ import annotations
 
 import logging
@@ -27,21 +28,35 @@ _DEFAULT_CSV = Path(__file__).resolve().parents[2] / "data" / "payroll.csv"
 
 # Os padrões abaixo rodam sobre texto normalizado (minúsculo e sem acentos).
 _MONTH_NAMES = {
-    "janeiro": 1, "fevereiro": 2, "marco": 3, "abril": 4, "maio": 5, "junho": 6,
-    "julho": 7, "agosto": 8, "setembro": 9, "outubro": 10, "novembro": 11, "dezembro": 12,
+    "janeiro": 1,
+    "fevereiro": 2,
+    "marco": 3,
+    "abril": 4,
+    "maio": 5,
+    "junho": 6,
+    "julho": 7,
+    "agosto": 8,
+    "setembro": 9,
+    "outubro": 10,
+    "novembro": 11,
+    "dezembro": 12,
 }
 _MONTH_ABBR = {name[:3]: number for name, number in _MONTH_NAMES.items()}
 # Nome completo do mês: o ano é opcional (sem ano, vale o mais recente dos dados).
 _FULL_MONTH_RE = re.compile(rf"\b({'|'.join(_MONTH_NAMES)})\b")
 # Abreviação ("jun/2025", "jun 2025"): exige o ano junto, porque "dez", "set",
 # "mar" e "out" também são palavras comuns.
-_ABBR_MONTH_RE = re.compile(
-    rf"\b({'|'.join(_MONTH_ABBR)})\.?\s*(?:/|-|de\s+)?\s*(20\d{{2}})\b"
-)
+_ABBR_MONTH_RE = re.compile(rf"\b({'|'.join(_MONTH_ABBR)})\.?\s*(?:/|-|de\s+)?\s*(20\d{{2}})\b")
 _YEAR_RE = re.compile(r"\b(20\d{2})\b")
 _ORDINALS = {
-    "primeiro": 1, "segundo": 2, "terceiro": 3, "quarto": 4,
-    "1": 1, "2": 2, "3": 3, "4": 4,
+    "primeiro": 1,
+    "segundo": 2,
+    "terceiro": 3,
+    "quarto": 4,
+    "1": 1,
+    "2": 2,
+    "3": 3,
+    "4": 4,
 }
 _PERIOD_RE = re.compile(
     r"\b(primeiro|segundo|terceiro|quarto|[1-4])\s*(?:o|°|\.)?\s*(trimestre|semestre)\b"
@@ -70,13 +85,33 @@ _METRIC_TERMS: list[tuple[str, tuple[str, ...]]] = [
     ("irrf", ("irrf", "imposto de renda")),
     ("bonus", ("bonus", "bonificacao")),
     ("deductions", ("desconto", "descontos")),
-    ("benefits", ("beneficio", "beneficios", "vt", "vr", "vale transporte",
-                  "vale refeicao", "vale alimentacao")),
-    ("full", ("holerite", "contracheque", "detalhado", "detalhada", "detalhes",
-              "detalhamento", "completo", "discriminado")),
+    (
+        "benefits",
+        (
+            "beneficio",
+            "beneficios",
+            "vt",
+            "vr",
+            "vale transporte",
+            "vale refeicao",
+            "vale alimentacao",
+        ),
+    ),
+    (
+        "full",
+        (
+            "holerite",
+            "contracheque",
+            "detalhado",
+            "detalhada",
+            "detalhes",
+            "detalhamento",
+            "completo",
+            "discriminado",
+        ),
+    ),
     ("base_salary", ("salario base",)),
-    ("payment_date", ("quando", "foi pago", "foi paga", "data de pagamento",
-                      "data do pagamento")),
+    ("payment_date", ("quando", "foi pago", "foi paga", "data de pagamento", "data do pagamento")),
     ("net_pay", ("liquido", "recebi", "recebeu", "receber")),
 ]
 
@@ -84,7 +119,7 @@ _METRIC_TERMS: list[tuple[str, tuple[str, ...]]] = [
 class _Metric(NamedTuple):
     column: str
     short: str  # "INSS" -> "• Maio/2025: INSS R$ 880,00"
-    noun: str   # "desconto de INSS" -> "O maior desconto de INSS de ..."
+    noun: str  # "desconto de INSS" -> "O maior desconto de INSS de ..."
     total: str  # "Total de INSS"
 
 
@@ -94,9 +129,12 @@ _METRICS: dict[str, _Metric] = {
     "bonus": _Metric("bonus", "bônus", "bônus", "Total de bônus"),
     "inss": _Metric("deductions_inss", "INSS", "desconto de INSS", "Total de INSS"),
     "irrf": _Metric("deductions_irrf", "IRRF", "desconto de IRRF", "Total de IRRF"),
-    "deductions": _Metric("total_deductions", "descontos", "total de descontos", "Total de descontos"),
-    "benefits": _Metric("benefits_vt_vr", "benefícios", "valor de benefícios (VT/VR)",
-                        "Total de benefícios (VT/VR)"),
+    "deductions": _Metric(
+        "total_deductions", "descontos", "total de descontos", "Total de descontos"
+    ),
+    "benefits": _Metric(
+        "benefits_vt_vr", "benefícios", "valor de benefícios (VT/VR)", "Total de benefícios (VT/VR)"
+    ),
 }
 
 # Linhas extras do registro mensal, além de líquido e data (sempre exibidos).
@@ -145,8 +183,14 @@ class QueryParams:
     def has_signal(self) -> bool:
         """True se a pergunta traz algo que a folha sabe responder."""
         return bool(
-            self.name or self.candidates or self.competency or self.period
-            or self.period_error or self.metric or self.extreme or self.aggregate
+            self.name
+            or self.candidates
+            or self.competency
+            or self.period
+            or self.period_error
+            or self.metric
+            or self.extreme
+            or self.aggregate
         )
 
     def follow_up_of(self, prev: QueryParams) -> QueryParams:
@@ -289,8 +333,11 @@ class PayrollRAG:
             kind = latest.group(1)
             last = self._latest_competency(year)
             if last is None:
-                raise PeriodError(f"Não há dados de folha de {year}." if year
-                                  else "Não há dados de folha carregados.")
+                raise PeriodError(
+                    f"Não há dados de folha de {year}."
+                    if year
+                    else "Não há dados de folha carregados."
+                )
             year, month = int(last[:4]), int(last[5:7])
             n = (month - 1) // 3 + 1 if kind == "trimestre" else (1 if month <= 6 else 2)
         elif _PERIOD_WORD_RE.search(q):
@@ -370,20 +417,22 @@ class PayrollRAG:
     def _build_evidence(self, rows: pd.DataFrame, query_type: str) -> dict[str, Any]:
         sources: list[dict[str, Any]] = []
         for _, r in rows.iterrows():
-            sources.append({
-                "employee_id": str(r["employee_id"]),
-                "name": str(r["name"]),
-                "competency": str(r["competency"]),
-                "payment_date": str(r["payment_date"]),
-                "base_salary": float(r["base_salary"]),
-                "bonus": float(r["bonus"]),
-                "benefits_vt_vr": float(r["benefits_vt_vr"]),
-                "other_earnings": float(r["other_earnings"]),
-                "deductions_inss": float(r["deductions_inss"]),
-                "deductions_irrf": float(r["deductions_irrf"]),
-                "other_deductions": float(r["other_deductions"]),
-                "net_pay": float(r["net_pay"]),
-            })
+            sources.append(
+                {
+                    "employee_id": str(r["employee_id"]),
+                    "name": str(r["name"]),
+                    "competency": str(r["competency"]),
+                    "payment_date": str(r["payment_date"]),
+                    "base_salary": float(r["base_salary"]),
+                    "bonus": float(r["bonus"]),
+                    "benefits_vt_vr": float(r["benefits_vt_vr"]),
+                    "other_earnings": float(r["other_earnings"]),
+                    "deductions_inss": float(r["deductions_inss"]),
+                    "deductions_irrf": float(r["deductions_irrf"]),
+                    "other_deductions": float(r["other_deductions"]),
+                    "net_pay": float(r["net_pay"]),
+                }
+            )
         return {
             "sources": sources,
             "employee_ids": sorted({s["employee_id"] for s in sources}),
@@ -452,8 +501,9 @@ class PayrollRAG:
             'Tente, por exemplo: "líquido de Ana Souza em maio/2025".'
         )
 
-    def _answer_single_record(self, name: str, competency: str,
-                              metric: str | None) -> dict[str, Any]:
+    def _answer_single_record(
+        self, name: str, competency: str, metric: str | None
+    ) -> dict[str, Any]:
         rows = self._rows_for(name)
         rows = rows[rows["competency"] == competency]
         if rows.empty:
@@ -468,8 +518,9 @@ class PayrollRAG:
         lines.append(f"• Data de pagamento: {format_date(str(r['payment_date']))}")
         return self._ok("\n".join(lines), rows, "single_record")
 
-    def _answer_employee_aggregate(self, name: str, period: list[str] | None,
-                                   metric: str | None) -> dict[str, Any]:
+    def _answer_employee_aggregate(
+        self, name: str, period: list[str] | None, metric: str | None
+    ) -> dict[str, Any]:
         m = self._metric(metric)
         label = self._period_label(period)
         rows = self._rows_for(name)
@@ -486,8 +537,9 @@ class PayrollRAG:
         )
         return self._ok(data, rows, "employee_aggregate")
 
-    def _answer_global_aggregate(self, period: list[str] | None,
-                                 metric: str | None) -> dict[str, Any]:
+    def _answer_global_aggregate(
+        self, period: list[str] | None, metric: str | None
+    ) -> dict[str, Any]:
         m = self._metric(metric)
         label = self._period_label(period)
         rows = self.df
@@ -516,8 +568,9 @@ class PayrollRAG:
             )
         return self._ok("\n".join(lines), rows, "employee_listing")
 
-    def _answer_extreme(self, name: str | None, scope: list[str] | None,
-                        metric: str | None, is_max: bool) -> dict[str, Any]:
+    def _answer_extreme(
+        self, name: str | None, scope: list[str] | None, metric: str | None, is_max: bool
+    ) -> dict[str, Any]:
         m = self._metric(metric)
         rows = self._rows_for(name) if name else self.df
         if scope:
@@ -531,8 +584,11 @@ class PayrollRAG:
         hits = rows.loc[values == target].sort_values(["competency", "name"])
         comps = [f"{format_competency(str(c))} ({c})" for c in hits["competency"]]
         if name:
-            where = (f"na competência {comps[0]}" if len(comps) == 1
-                     else f"nas competências {_join_pt(comps)}")
+            where = (
+                f"na competência {comps[0]}"
+                if len(comps) == 1
+                else f"nas competências {_join_pt(comps)}"
+            )
         else:
             where = "para " + _join_pt([f"{n} em {c}" for n, c in zip(hits["name"], comps)])
 

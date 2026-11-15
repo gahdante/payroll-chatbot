@@ -1,4 +1,5 @@
 """Modelos Pydantic (v2) da API."""
+
 from datetime import UTC, datetime
 from typing import Any
 
@@ -25,7 +26,9 @@ class ChatResponse(BaseModel):
 
     response: str = Field(..., description="Resposta do chatbot")
     tool_used: str = Field(..., description="Ferramenta usada: rag, web, general ou error")
-    evidence: dict[str, Any] | None = Field(default=None, description="Fontes/evidências da resposta")
+    evidence: dict[str, Any] | None = Field(
+        default=None, description="Fontes/evidências da resposta"
+    )
     session_id: str | None = Field(default=None, description="ID da sessão desta conversa")
 
 

@@ -8,6 +8,7 @@
 - Sem busca ao vivo, cai em uma base de referência local, e a resposta avisa
   que o dado pode estar desatualizado.
 """
+
 import logging
 import os
 from datetime import date, timedelta
@@ -36,41 +37,56 @@ _CLT_ENTRY = {
 }
 
 _REFERENCE = [
-    (("selic", "taxa básica", "taxa basica", "taxa de juros"), {
-        "title": "Taxa Selic — Banco Central do Brasil",
-        "url": "https://www.bcb.gov.br/controleinflacao/taxaselic",
-        "snippet": "A Selic é a taxa básica de juros da economia brasileira, definida pelo Copom.",
-        "reference": "Banco Central do Brasil (Copom)",
-        "detail": "O valor vigente muda a cada reunião do Copom; consulte o site do BC para a taxa atual.",
-    }),
-    (("férias", "ferias"), {
-        "title": "Férias — CLT, arts. 129 a 145",
-        "url": "https://www.planalto.gov.br/ccivil_03/decreto-lei/del5452.htm",
-        "snippet": "Férias proporcionais correspondem a 1/12 por mês trabalhado (ou fração superior a 14 dias).",
-        "reference": "CLT, arts. 130 e 146",
-        "detail": "Sobre a remuneração de férias incide o adicional de 1/3 (CF, art. 7º, XVII).",
-    }),
-    (("fgts", "fundo de garantia"), {
-        "title": "FGTS — Fundo de Garantia do Tempo de Serviço",
-        "url": "https://www.gov.br/fgts",
-        "snippet": "O empregador deposita mensalmente 8% da remuneração do empregado em conta vinculada do FGTS.",
-        "reference": "Lei nº 8.036/1990",
-        "detail": "No contrato de aprendizagem a alíquota é de 2%.",
-    }),
-    (("inss", "previdência", "previdencia", "contribuição previdenciária"), {
-        "title": "Contribuição ao INSS — tabela progressiva",
-        "url": "https://www.gov.br/inss",
-        "snippet": "O desconto previdenciário do empregado segue alíquotas progressivas de 7,5% a 14% sobre o salário de contribuição.",
-        "reference": "Lei nº 8.212/1991 e portaria interministerial anual",
-        "detail": "Há um teto do salário de contribuição, reajustado todo ano.",
-    }),
-    (("13º", "13o", "décimo terceiro", "decimo terceiro", "gratificação natalina"), {
-        "title": "13º salário (gratificação natalina)",
-        "url": "https://www.planalto.gov.br/ccivil_03/leis/l4090.htm",
-        "snippet": "O 13º equivale a 1/12 da remuneração por mês trabalhado no ano, pago em duas parcelas.",
-        "reference": "Lei nº 4.090/1962 e Lei nº 4.749/1965",
-        "detail": "A 1ª parcela vai até 30/11 e a 2ª até 20/12.",
-    }),
+    (
+        ("selic", "taxa básica", "taxa basica", "taxa de juros"),
+        {
+            "title": "Taxa Selic — Banco Central do Brasil",
+            "url": "https://www.bcb.gov.br/controleinflacao/taxaselic",
+            "snippet": "A Selic é a taxa básica de juros da economia brasileira, definida pelo Copom.",
+            "reference": "Banco Central do Brasil (Copom)",
+            "detail": "O valor vigente muda a cada reunião do Copom; consulte o site do BC para a taxa atual.",
+        },
+    ),
+    (
+        ("férias", "ferias"),
+        {
+            "title": "Férias — CLT, arts. 129 a 145",
+            "url": "https://www.planalto.gov.br/ccivil_03/decreto-lei/del5452.htm",
+            "snippet": "Férias proporcionais correspondem a 1/12 por mês trabalhado (ou fração superior a 14 dias).",
+            "reference": "CLT, arts. 130 e 146",
+            "detail": "Sobre a remuneração de férias incide o adicional de 1/3 (CF, art. 7º, XVII).",
+        },
+    ),
+    (
+        ("fgts", "fundo de garantia"),
+        {
+            "title": "FGTS — Fundo de Garantia do Tempo de Serviço",
+            "url": "https://www.gov.br/fgts",
+            "snippet": "O empregador deposita mensalmente 8% da remuneração do empregado em conta vinculada do FGTS.",
+            "reference": "Lei nº 8.036/1990",
+            "detail": "No contrato de aprendizagem a alíquota é de 2%.",
+        },
+    ),
+    (
+        ("inss", "previdência", "previdencia", "contribuição previdenciária"),
+        {
+            "title": "Contribuição ao INSS — tabela progressiva",
+            "url": "https://www.gov.br/inss",
+            "snippet": "O desconto previdenciário do empregado segue alíquotas progressivas de 7,5% a 14% sobre o salário de contribuição.",
+            "reference": "Lei nº 8.212/1991 e portaria interministerial anual",
+            "detail": "Há um teto do salário de contribuição, reajustado todo ano.",
+        },
+    ),
+    (
+        ("13º", "13o", "décimo terceiro", "decimo terceiro", "gratificação natalina"),
+        {
+            "title": "13º salário (gratificação natalina)",
+            "url": "https://www.planalto.gov.br/ccivil_03/leis/l4090.htm",
+            "snippet": "O 13º equivale a 1/12 da remuneração por mês trabalhado no ano, pago em duas parcelas.",
+            "reference": "Lei nº 4.090/1962 e Lei nº 4.749/1965",
+            "detail": "A 1ª parcela vai até 30/11 e a 2ª até 20/12.",
+        },
+    ),
 ]
 
 
@@ -126,7 +142,9 @@ class WebSearch:
 
     def _reference_search(self, query: str) -> dict[str, Any]:
         q = query.lower()
-        chosen = next((entry for keys, entry in _REFERENCE if any(k in q for k in keys)), _CLT_ENTRY)
+        chosen = next(
+            (entry for keys, entry in _REFERENCE if any(k in q for k in keys)), _CLT_ENTRY
+        )
         return {"success": True, "results": [chosen], "query": query, "fallback": True}
 
     async def _selic_bcb(self, today: date | None = None) -> dict[str, Any]:
@@ -154,11 +172,13 @@ class WebSearch:
             f"Fonte: Banco Central do Brasil — SGS, série 432 ({self.BCB_SELIC_PAGE})"
         )
         evidence = {
-            "sources": [{
-                "title": "Banco Central do Brasil — Meta Selic (SGS, série 432)",
-                "url": self.BCB_SELIC_PAGE,
-                "snippet": f"Meta Selic de {rate}% a.a. em {day}.",
-            }],
+            "sources": [
+                {
+                    "title": "Banco Central do Brasil — Meta Selic (SGS, série 432)",
+                    "url": self.BCB_SELIC_PAGE,
+                    "snippet": f"Meta Selic de {rate}% a.a. em {day}.",
+                }
+            ],
             "query_type": "web",
         }
         return {"success": True, "data": data, "evidence": evidence}
@@ -173,7 +193,11 @@ class WebSearch:
         result = await self.search(query)  # já cai na base local se a busca falhar
         results: list[dict[str, Any]] = result.get("results", [])
         if not result.get("success") or not results:
-            return {"success": False, "data": "Nenhum resultado encontrado na busca.", "evidence": None}
+            return {
+                "success": False,
+                "data": "Nenhum resultado encontrado na busca.",
+                "evidence": None,
+            }
 
         top = results[0]
         lines = [f'Sobre "{query}":', "", top.get("snippet", "")]
@@ -186,7 +210,11 @@ class WebSearch:
 
         evidence = {
             "sources": [
-                {"title": r.get("title", ""), "url": r.get("url", ""), "snippet": r.get("snippet", "")}
+                {
+                    "title": r.get("title", ""),
+                    "url": r.get("url", ""),
+                    "snippet": r.get("snippet", ""),
+                }
                 for r in results
             ],
             "query_type": "web",

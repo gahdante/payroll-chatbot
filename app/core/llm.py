@@ -1,4 +1,5 @@
 """Configuração e chamada do LLM (OpenAI)."""
+
 import logging
 import os
 

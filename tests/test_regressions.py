@@ -1,4 +1,5 @@
 """Regressões: perguntas que recebiam resposta errada antes da revisão."""
+
 from datetime import date
 from pathlib import Path
 from typing import Any
@@ -166,8 +167,9 @@ class TestFollowUps:
         assert r["evidence"]["employee_ids"] == ["E001"]
 
     async def test_web_question_breaks_the_thread(self, agent: PayrollAgent):
-        r = await _chat(agent, "Quanto a Ana recebeu em maio/2025?", "Qual é o valor do FGTS?",
-                        "E em março?")
+        r = await _chat(
+            agent, "Quanto a Ana recebeu em maio/2025?", "Qual é o valor do FGTS?", "E em março?"
+        )
         assert r["evidence"]["total_records"] == 2  # folha do mês, sem filtrar a Ana
 
     async def test_full_question_does_not_inherit(self, agent: PayrollAgent):
@@ -217,10 +219,13 @@ class TestSelic:
 
         def handler(request: httpx.Request) -> httpx.Response:
             seen["params"] = dict(request.url.params)
-            return httpx.Response(200, json=[
-                {"data": "14/11/2026", "valor": "13.75"},
-                {"data": "15/11/2026", "valor": "13.75"},
-            ])
+            return httpx.Response(
+                200,
+                json=[
+                    {"data": "14/11/2026", "valor": "13.75"},
+                    {"data": "15/11/2026", "valor": "13.75"},
+                ],
+            )
 
         ws = WebSearch(transport=httpx.MockTransport(handler))
         r = await ws.search_with_citation("Traga a taxa Selic atual e cite a fonte")

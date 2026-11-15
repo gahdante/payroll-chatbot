@@ -2,6 +2,7 @@
 Utilitários de formatação para o sistema de folha de pagamento
 Implementa formatação brasileira de moeda, datas e números
 """
+
 import re
 from datetime import datetime
 from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
@@ -63,13 +64,14 @@ def parse_currency(value: str | None) -> float | None:
     amount = _parse_decimal(value)
     return float(amount) if amount is not None else None
 
+
 def format_date(date_input: str | datetime) -> str:
     """
     Formata data para formato brasileiro (dd/mm/aaaa)
-    
+
     Args:
         date_input: Data em string ou datetime
-        
+
     Returns:
         String formatada em dd/mm/aaaa
     """
@@ -77,61 +79,62 @@ def format_date(date_input: str | datetime) -> str:
         if isinstance(date_input, str):
             # Tenta diferentes formatos de entrada
             formats = [
-                '%Y-%m-%d',      # 2025-01-28
-                '%d/%m/%Y',      # 28/01/2025
-                '%d-%m-%Y',      # 28-01-2025
-                '%Y/%m/%d',      # 2025/01/28
+                "%Y-%m-%d",  # 2025-01-28
+                "%d/%m/%Y",  # 28/01/2025
+                "%d-%m-%Y",  # 28-01-2025
+                "%Y/%m/%d",  # 2025/01/28
             ]
-            
+
             for fmt in formats:
                 try:
                     date_obj = datetime.strptime(date_input, fmt)
-                    return date_obj.strftime('%d/%m/%Y')
+                    return date_obj.strftime("%d/%m/%Y")
                 except ValueError:
                     continue
-            
+
             # Se nenhum formato funcionou, retorna como está
             return date_input
-            
-        return date_input.strftime('%d/%m/%Y')
-            
+
+        return date_input.strftime("%d/%m/%Y")
+
     except (ValueError, TypeError, AttributeError):
         return "Data inválida"
+
 
 def parse_date(date_str: str) -> str | None:
     """
     Converte string de data para formato YYYY-MM-DD
-    
+
     Args:
         date_str: String com data
-        
+
     Returns:
         String no formato YYYY-MM-DD ou None se inválido
     """
     try:
         if not date_str:
             return None
-        
+
         # Remove espaços extras
         date_str = date_str.strip()
-        
+
         # Tenta diferentes formatos de entrada
         formats = [
-            '%d/%m/%Y',      # 28/01/2025
-            '%d-%m-%Y',      # 28-01-2025
-            '%Y-%m-%d',      # 2025-01-28
-            '%Y/%m/%d',      # 2025/01/28
+            "%d/%m/%Y",  # 28/01/2025
+            "%d-%m-%Y",  # 28-01-2025
+            "%Y-%m-%d",  # 2025-01-28
+            "%Y/%m/%d",  # 2025/01/28
         ]
-        
+
         for fmt in formats:
             try:
                 date_obj = datetime.strptime(date_str, fmt)
-                return date_obj.strftime('%Y-%m-%d')
+                return date_obj.strftime("%Y-%m-%d")
             except ValueError:
                 continue
-        
+
         return None
-        
+
     except (ValueError, TypeError, AttributeError):
         return None
 
@@ -139,77 +142,94 @@ def parse_date(date_str: str) -> str | None:
 def format_competency(competency: str) -> str:
     """
     Formata competência para exibição
-    
+
     Args:
         competency: Competência no formato YYYY-MM
-        
+
     Returns:
         Competência formatada
     """
     try:
         if not competency:
             return ""
-        
+
         # Se já está no formato YYYY-MM
-        if re.match(r'\d{4}-\d{2}', competency):
-            year, month = competency.split('-')
-            
+        if re.match(r"\d{4}-\d{2}", competency):
+            year, month = competency.split("-")
+
             # Mapeamento de meses
             month_names = {
-                '01': 'Janeiro', '02': 'Fevereiro', '03': 'Março',
-                '04': 'Abril', '05': 'Maio', '06': 'Junho',
-                '07': 'Julho', '08': 'Agosto', '09': 'Setembro',
-                '10': 'Outubro', '11': 'Novembro', '12': 'Dezembro'
+                "01": "Janeiro",
+                "02": "Fevereiro",
+                "03": "Março",
+                "04": "Abril",
+                "05": "Maio",
+                "06": "Junho",
+                "07": "Julho",
+                "08": "Agosto",
+                "09": "Setembro",
+                "10": "Outubro",
+                "11": "Novembro",
+                "12": "Dezembro",
             }
-            
+
             month_name = month_names.get(month, month)
             return f"{month_name}/{year}"
-        
+
         return competency
-        
+
     except (ValueError, TypeError, AttributeError):
         return competency
+
 
 def parse_competency(competency: str) -> str | None:
     """
     Converte competência para formato YYYY-MM
-    
+
     Args:
         competency: Competência em formato variado
-        
+
     Returns:
         Competência no formato YYYY-MM ou None se inválido
     """
     try:
         if not competency:
             return None
-        
+
         competency = competency.strip()
-        
+
         # Se já está no formato YYYY-MM
-        if re.match(r'\d{4}-\d{2}', competency):
+        if re.match(r"\d{4}-\d{2}", competency):
             return competency
-        
+
         # Tenta converter de outros formatos
         # Ex: "Janeiro/2025" -> "2025-01"
         month_mapping = {
-            'janeiro': '01', 'fevereiro': '02', 'março': '03',
-            'abril': '04', 'maio': '05', 'junho': '06',
-            'julho': '07', 'agosto': '08', 'setembro': '09',
-            'outubro': '10', 'novembro': '11', 'dezembro': '12'
+            "janeiro": "01",
+            "fevereiro": "02",
+            "março": "03",
+            "abril": "04",
+            "maio": "05",
+            "junho": "06",
+            "julho": "07",
+            "agosto": "08",
+            "setembro": "09",
+            "outubro": "10",
+            "novembro": "11",
+            "dezembro": "12",
         }
-        
+
         # Padrão: mês/ano ou mês-ano
-        pattern = r'(\w+)[/-](\d{4})'
+        pattern = r"(\w+)[/-](\d{4})"
         match = re.search(pattern, competency.lower())
-        
+
         if match:
             month_name, year = match.groups()
             month_num = month_mapping.get(month_name)
             if month_num:
                 return f"{year}-{month_num}"
-        
+
         return None
-        
+
     except (ValueError, TypeError, AttributeError):
         return None

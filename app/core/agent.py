@@ -1,4 +1,5 @@
 """Agente que roteia entre RAG (folha), busca web e conversa geral."""
+
 import logging
 import re
 from typing import Any
@@ -15,15 +16,47 @@ logger = logging.getLogger(__name__)
 
 # Termos comparados como palavra inteira e sem acento (ver utils.text).
 _WEB_TERMS = (
-    "lei", "leis", "legislacao", "clt", "fgts", "selic", "ferias", "13o",
-    "decimo terceiro", "rescisao", "aviso previo", "previdencia", "aliquota",
-    "aliquotas", "teto", "salario minimo", "como calcular", "como funciona",
-    "o que e", "taxa de juros",
+    "lei",
+    "leis",
+    "legislacao",
+    "clt",
+    "fgts",
+    "selic",
+    "ferias",
+    "13o",
+    "decimo terceiro",
+    "rescisao",
+    "aviso previo",
+    "previdencia",
+    "aliquota",
+    "aliquotas",
+    "teto",
+    "salario minimo",
+    "como calcular",
+    "como funciona",
+    "o que e",
+    "taxa de juros",
 )
 _PAYROLL_TERMS = (
-    "salario", "liquido", "bruto", "holerite", "contracheque", "folha", "bonus",
-    "desconto", "descontos", "competencia", "trimestre", "semestre", "recebi",
-    "recebeu", "pagamento", "inss", "irrf", "beneficio", "beneficios",
+    "salario",
+    "liquido",
+    "bruto",
+    "holerite",
+    "contracheque",
+    "folha",
+    "bonus",
+    "desconto",
+    "descontos",
+    "competencia",
+    "trimestre",
+    "semestre",
+    "recebi",
+    "recebeu",
+    "pagamento",
+    "inss",
+    "irrf",
+    "beneficio",
+    "beneficios",
 )
 # "E em junho?", "Agora o INSS", "Também do Bruno?"
 _FOLLOW_UP_START = re.compile(r"^\W*(?:e|agora|tambem|entao)\b")
@@ -52,8 +85,12 @@ class PayrollAgent:
         params: QueryParams = self.rag.parse(message)
         web = contains_any(message, _WEB_TERMS)
 
-        if (has_payroll_context and not web and params.has_signal()
-                and self._looks_like_follow_up(message)):
+        if (
+            has_payroll_context
+            and not web
+            and params.has_signal()
+            and self._looks_like_follow_up(message)
+        ):
             return "rag", True
         if params.name or params.candidates:
             return "rag", False
@@ -70,17 +107,18 @@ class PayrollAgent:
             session_id = self.memory.create_session(session_id)
         # Um "Obrigado!" no meio não quebra o fio da consulta; uma busca web, sim.
         last_tool = self.memory.get_context_data(session_id, "last_tool_used")
-        has_payroll_context = (
-            self.memory.get_context_data(session_id, _CONTEXT_KEY) is not None
-            and last_tool in ("rag", "general")
-        )
+        has_payroll_context = self.memory.get_context_data(
+            session_id, _CONTEXT_KEY
+        ) is not None and last_tool in ("rag", "general")
         self.memory.add_message(session_id, "user", message)
 
         result: dict[str, Any]
         try:
             kind, follow_up = self._route(message, has_payroll_context)
             if kind == "rag":
-                context = self.memory.get_context_data(session_id, _CONTEXT_KEY) if follow_up else None
+                context = (
+                    self.memory.get_context_data(session_id, _CONTEXT_KEY) if follow_up else None
+                )
                 result = await self._handle_rag(message, context)
                 if result.get("params"):
                     self.memory.update_context_data(session_id, _CONTEXT_KEY, result["params"])
@@ -92,14 +130,17 @@ class PayrollAgent:
             logger.exception("Erro ao processar consulta")
             result = {
                 "response": "Desculpe, tive um problema para processar sua mensagem. "
-                            "Pode tentar de novo em instantes?",
+                "Pode tentar de novo em instantes?",
                 "evidence": None,
                 "tool_used": "error",
             }
 
         self.memory.add_message(
-            session_id, "assistant", result["response"],
-            tool_used=result["tool_used"], evidence=result.get("evidence"),
+            session_id,
+            "assistant",
+            result["response"],
+            tool_used=result["tool_used"],
+            evidence=result.get("evidence"),
         )
         self.memory.update_context_data(session_id, "last_tool_used", result["tool_used"])
         return {
@@ -109,7 +150,9 @@ class PayrollAgent:
             "session_id": session_id,
         }
 
-    async def _handle_rag(self, message: str, context: dict[str, Any] | None = None) -> dict[str, Any]:
+    async def _handle_rag(
+        self, message: str, context: dict[str, Any] | None = None
+    ) -> dict[str, Any]:
         rag = await self.rag.query(message, context=context)
         return {
             "response": rag["data"],

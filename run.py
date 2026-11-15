@@ -1,4 +1,5 @@
 """Sobe a API em modo de desenvolvimento."""
+
 import os
 import sys
 from pathlib import Path

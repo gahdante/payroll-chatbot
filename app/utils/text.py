@@ -1,4 +1,5 @@
 """Normalização de texto para casar termos sem depender de acentos ou caixa."""
+
 import re
 import unicodedata
 from collections.abc import Iterable

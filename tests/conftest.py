@@ -1,4 +1,5 @@
 """Fixtures compartilhadas dos testes."""
+
 import os
 from pathlib import Path
 
@@ -26,6 +27,7 @@ def _offline_web_search(monkeypatch: pytest.MonkeyPatch):
     Um ``WebSearch`` sem transporte injetado recebe um que sempre falha, e o
     código segue para a base de referência local, como faria sem rede.
     """
+
     def offline(request: httpx.Request) -> httpx.Response:
         raise httpx.ConnectError("rede desabilitada nos testes", request=request)
 

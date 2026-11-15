@@ -1,4 +1,5 @@
 """Testes de RAG (extração, roteamento), busca web, formatação, modelos e agente."""
+
 from unittest.mock import AsyncMock
 
 import pytest
@@ -31,7 +32,11 @@ class TestExtraction:
 
     def test_period(self, rag: PayrollRAG):
         assert rag._extract_period("1º trimestre de 2025") == ["2025-01", "2025-02", "2025-03"]
-        assert rag._extract_period("primeiro trimestre de 2025") == ["2025-01", "2025-02", "2025-03"]
+        assert rag._extract_period("primeiro trimestre de 2025") == [
+            "2025-01",
+            "2025-02",
+            "2025-03",
+        ]
         assert rag._extract_period("2º trimestre de 2025") == ["2025-04", "2025-05", "2025-06"]
         assert rag._extract_period("1º semestre de 2025") == [f"2025-{m:02d}" for m in range(1, 7)]
         assert rag._extract_period("salário de maio") is None

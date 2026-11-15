@@ -8,7 +8,19 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
+from ..utils.text import contains_any
+
 logger = logging.getLogger(__name__)
+
+_TOPIC_TERMS = {
+    "salário": ("salario", "liquido", "recebi", "recebeu"),
+    "descontos": ("desconto", "descontos"),
+    "INSS": ("inss",),
+    "IRRF": ("irrf", "imposto de renda"),
+    "bônus": ("bonus",),
+    "trimestre": ("trimestre",),
+    "semestre": ("semestre",),
+}
 
 @dataclass
 class Message:
@@ -222,59 +234,27 @@ class ConversationMemory:
             "competencies_mentioned": []
         }
         
-        # Analisa ferramentas utilizadas
-        tools_used = set()
+        # Funcionários e competências saem das evidências do RAG, não de texto livre.
+        tools_used, topics, employees, competencies = set(), set(), set(), set()
         for message in session.messages:
             if message.tool_used:
                 tools_used.add(message.tool_used)
-        context_summary["tools_used"] = list(tools_used)
-        
-        # Analisa tópicos discutidos
-        topics = set()
-        for message in session.messages:
-            content_lower = message.content.lower()
-            if "salário" in content_lower or "salario" in content_lower:
-                topics.add("salário")
-            if "desconto" in content_lower:
-                topics.add("descontos")
-            if "inss" in content_lower:
-                topics.add("INSS")
-            if "irrf" in content_lower:
-                topics.add("IRRF")
-            if "bônus" in content_lower or "bonus" in content_lower:
-                topics.add("bônus")
-            if "trimestre" in content_lower:
-                topics.add("trimestre")
-        context_summary["topics_discussed"] = list(topics)
-        
-        # Analisa menções de funcionários
-        employees = set()
-        for message in session.messages:
-            content = message.content
-            if "Ana Souza" in content:
-                employees.add("Ana Souza")
-            if "Bruno Lima" in content:
-                employees.add("Bruno Lima")
-        context_summary["employee_mentions"] = list(employees)
-        
-        # Analisa competências mencionadas
-        competencies = set()
-        for message in session.messages:
-            content = message.content
-            if "2025-01" in content or "janeiro" in content.lower():
-                competencies.add("2025-01")
-            if "2025-02" in content or "fevereiro" in content.lower():
-                competencies.add("2025-02")
-            if "2025-03" in content or "março" in content.lower():
-                competencies.add("2025-03")
-            if "2025-04" in content or "abril" in content.lower():
-                competencies.add("2025-04")
-            if "2025-05" in content or "maio" in content.lower():
-                competencies.add("2025-05")
-            if "2025-06" in content or "junho" in content.lower():
-                competencies.add("2025-06")
-        context_summary["competencies_mentioned"] = list(competencies)
-        
+            for source in (message.evidence or {}).get("sources") or []:
+                if source.get("name"):
+                    employees.add(source["name"])
+                if source.get("competency"):
+                    competencies.add(source["competency"])
+            if message.role == "user":
+                topics.update(
+                    topic for topic, terms in _TOPIC_TERMS.items()
+                    if contains_any(message.content, terms)
+                )
+
+        context_summary["tools_used"] = sorted(tools_used)
+        context_summary["topics_discussed"] = sorted(topics)
+        context_summary["employee_mentions"] = sorted(employees)
+        context_summary["competencies_mentioned"] = sorted(competencies)
+
         return context_summary
     
     def update_context_data(self, session_id: str, key: str, value: Any) -> bool:

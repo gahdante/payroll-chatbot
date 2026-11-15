@@ -6,9 +6,10 @@ Chatbot inteligente para consultas sobre folha de pagamento com RAG, busca na we
 
 - **Chat com LLM**: OpenAI (padrão `gpt-4o-mini`) para conversas gerais
 - **RAG de Folha**: consultas determinísticas no CSV (valores e datas nunca são reescritos pelo LLM)
-- **Web Search**: Google Custom Search quando configurado; caso contrário, base de referência local (a resposta avisa que o dado pode estar desatualizado)
+- **Web Search**: a taxa Selic vem ao vivo da API pública do Banco Central (sem chave). Os demais temas usam o Google Custom Search quando configurado; caso contrário, uma base de referência local (a resposta avisa que o dado pode estar desatualizado)
+  - ⚠️ A Google Custom Search JSON API não aceita novos clientes e será desligada pelo Google em 01/01/2027
 - **Interface React**: frontend responsivo com envio de `session_id`
-- **Memória de Conversa**: contexto entre turnos por sessão (`session_id` devolvido em cada resposta)
+- **Memória de Conversa**: contexto entre turnos por sessão (`session_id` devolvido em cada resposta). Perguntas de seguimento como "E em junho?", "E o Bruno?" ou "E o INSS?" reaproveitam o funcionário, a competência e a métrica da consulta anterior
 - **Evidências**: cada resposta de RAG/web devolve `evidence.sources` com as fontes
 
 ## 🛠️ Instalação
@@ -94,6 +95,13 @@ pytest --cov=app
 - "Qual foi o desconto de INSS do Bruno em jun/2025?"
 - "Quando foi pago o salário de abril/2025 do Bruno e qual o líquido?"
 - "Qual foi o maior bônus do Bruno e em que mês?"
+
+Também funcionam, entre outras:
+- "Qual foi o desconto do Bruno em abril/2025?" (INSS, IRRF, outros descontos e total)
+- "Holerite do Bruno em abril/2025" (todos os campos do registro)
+- "Qual o total de INSS da Ana no último trimestre?"
+- "Qual o menor bônus do Bruno?" (empates aparecem todos)
+- Seguimento: "Quanto a Ana recebeu em maio/2025?" → "E em junho?" → "E o Bruno?"
 
 ### Consultas Web (Legislação)
 - "Traga a taxa Selic atual e cite a fonte"

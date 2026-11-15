@@ -1,29 +1,33 @@
 """Agente que roteia entre RAG (folha), busca web e conversa geral."""
 import logging
-from typing import Any, Dict, Optional, Set
+import re
+from typing import Any, Dict, Optional, Tuple
 
 from .conversation_memory import ConversationMemory
 from .llm import LLMConfig
-from ..tools.payroll_rag import PayrollRAG
+from ..tools.payroll_rag import PayrollRAG, QueryParams
 from ..tools.web_search import WebSearch
+from ..utils.text import contains_any, normalize
 
 logger = logging.getLogger(__name__)
 
+# Termos comparados como palavra inteira e sem acento (ver utils.text).
 _WEB_TERMS = (
-    "lei", "legislação", "legislacao", "clt", "fgts", "selic", "férias", "ferias",
-    "13º", "13o", "décimo terceiro", "decimo terceiro", "rescisão", "rescisao",
-    "aviso prévio", "aviso previo", "previdência", "previdencia", "imposto de renda",
-    "como calcular", "como funciona", "o que é", "o que e", "taxa de juros",
+    "lei", "leis", "legislacao", "clt", "fgts", "selic", "ferias", "13o",
+    "decimo terceiro", "rescisao", "aviso previo", "previdencia", "aliquota",
+    "aliquotas", "teto", "salario minimo", "como calcular", "como funciona",
+    "o que e", "taxa de juros",
 )
 _PAYROLL_TERMS = (
-    "salário", "salario", "líquido", "liquido", "bruto", "holerite", "contracheque",
-    "folha", "bônus", "bonus", "desconto", "competência", "competencia", "trimestre",
-    "semestre", "recebi", "pagamento", "inss", "irrf",
+    "salario", "liquido", "bruto", "holerite", "contracheque", "folha", "bonus",
+    "desconto", "descontos", "competencia", "trimestre", "semestre", "recebi",
+    "recebeu", "pagamento", "inss", "irrf", "beneficio", "beneficios",
 )
-_SMALLTALK = (
-    "olá", "ola", "oi", "bom dia", "boa tarde", "boa noite", "obrigado", "obrigada",
-    "valeu", "tchau", "até logo", "ate logo", "tudo bem", "como vai", "e aí", "e ai",
-)
+# "E em junho?", "Agora o INSS", "Também do Bruno?"
+_FOLLOW_UP_START = re.compile(r"^\W*(?:e|agora|tambem|entao)\b")
+_FOLLOW_UP_MAX_WORDS = 4
+
+_CONTEXT_KEY = "payroll_params"
 
 
 class PayrollAgent:
@@ -34,36 +38,49 @@ class PayrollAgent:
         self.rag = PayrollRAG()
         self.web_search = WebSearch()
         self.memory = ConversationMemory()
-        self._employee_tokens = self._build_employee_tokens()
 
-    def _build_employee_tokens(self) -> Set[str]:
-        tokens: Set[str] = set()
-        for full in self.rag.known_names():
-            tokens.add(full.lower())
-            tokens.update(full.lower().split())
-        return tokens
+    @staticmethod
+    def _looks_like_follow_up(message: str) -> bool:
+        return bool(_FOLLOW_UP_START.match(normalize(message))) or (
+            len(message.split()) <= _FOLLOW_UP_MAX_WORDS
+        )
 
-    def _classify(self, message: str) -> str:
-        m = message.lower()
-        if any(token in m for token in self._employee_tokens):
-            return "rag"
-        if any(term in m for term in _WEB_TERMS):
-            return "web"
-        if any(term in m for term in _PAYROLL_TERMS):
-            return "rag"
-        if len(message.split()) <= 3 or any(term in m for term in _SMALLTALK):
-            return "general"
-        return "general"
+    def _route(self, message: str, has_payroll_context: bool = False) -> Tuple[str, bool]:
+        """Ferramenta que atende a mensagem e se ela continua a consulta anterior."""
+        params: QueryParams = self.rag.parse(message)
+        web = contains_any(message, _WEB_TERMS)
+
+        if (has_payroll_context and not web and params.has_signal()
+                and self._looks_like_follow_up(message)):
+            return "rag", True
+        if params.name or params.candidates:
+            return "rag", False
+        if web:
+            return "web", False
+        if params.competency or params.period or params.period_error:
+            return "rag", False
+        if contains_any(message, _PAYROLL_TERMS):
+            return "rag", False
+        return "general", False
 
     async def process_query(self, message: str, session_id: Optional[str] = None) -> Dict[str, Any]:
         if not session_id or session_id not in self.memory.sessions:
             session_id = self.memory.create_session(session_id)
+        # Um "Obrigado!" no meio não quebra o fio da consulta; uma busca web, sim.
+        last_tool = self.memory.get_context_data(session_id, "last_tool_used")
+        has_payroll_context = (
+            self.memory.get_context_data(session_id, _CONTEXT_KEY) is not None
+            and last_tool in ("rag", "general")
+        )
         self.memory.add_message(session_id, "user", message)
 
         try:
-            kind = self._classify(message)
+            kind, follow_up = self._route(message, has_payroll_context)
             if kind == "rag":
-                result = await self._handle_rag(message)
+                context = self.memory.get_context_data(session_id, _CONTEXT_KEY) if follow_up else None
+                result = await self._handle_rag(message, context)
+                if result.get("params"):
+                    self.memory.update_context_data(session_id, _CONTEXT_KEY, result["params"])
             elif kind == "web":
                 result = await self._handle_web(message)
             else:
@@ -82,12 +99,21 @@ class PayrollAgent:
             tool_used=result["tool_used"], evidence=result.get("evidence"),
         )
         self.memory.update_context_data(session_id, "last_tool_used", result["tool_used"])
-        result["session_id"] = session_id
-        return result
+        return {
+            "response": result["response"],
+            "evidence": result.get("evidence"),
+            "tool_used": result["tool_used"],
+            "session_id": session_id,
+        }
 
-    async def _handle_rag(self, message: str) -> Dict[str, Any]:
-        rag = await self.rag.query(message)
-        return {"response": rag["data"], "evidence": rag.get("evidence"), "tool_used": "rag"}
+    async def _handle_rag(self, message: str, context: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        rag = await self.rag.query(message, context=context)
+        return {
+            "response": rag["data"],
+            "evidence": rag.get("evidence"),
+            "tool_used": "rag",
+            "params": rag.get("params"),
+        }
 
     async def _handle_web(self, message: str) -> Dict[str, Any]:
         web = await self.web_search.search_with_citation(message)

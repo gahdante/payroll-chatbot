@@ -4,70 +4,65 @@ Implementa formatação brasileira de moeda, datas e números
 """
 import re
 from datetime import datetime
-from typing import Union, Optional, List
+from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
+from typing import Optional, Union
 
-def format_currency(value: Union[float, str, int]) -> str:
+_CENT = Decimal("0.01")
+# "1.500" ou "1.500.000": pontos como separador de milhar (padrão brasileiro).
+_THOUSANDS_ONLY = re.compile(r"\d{1,3}(?:\.\d{3})+")
+
+
+def _parse_decimal(value: str) -> Optional[Decimal]:
+    """Lê um valor monetário em texto ("R$ 1.500,50", "1500.50", "-10")."""
+    cleaned = re.sub(r"[^\d,.-]", "", value or "")
+    negative = cleaned.startswith("-")
+    cleaned = cleaned.replace("-", "")
+    if not cleaned:
+        return None
+    if "," in cleaned:
+        # Vírgula decimal e pontos de milhar: 1.500,50
+        cleaned = cleaned.replace(".", "").replace(",", ".")
+    elif _THOUSANDS_ONLY.fullmatch(cleaned):
+        cleaned = cleaned.replace(".", "")
+    try:
+        amount = Decimal(cleaned)
+    except InvalidOperation:
+        return None
+    return -amount if negative else amount
+
+
+def format_currency(value: Union[float, str, int, Decimal]) -> str:
     """
-    Formata valor em moeda brasileira (R$ 1.500,50)
-    
-    Args:
-        value: Valor a ser formatado
-        
-    Returns:
-        String formatada em moeda brasileira
+    Formata valor em moeda brasileira (R$ 1.500,50; negativos como -R$ 10,00).
+
+    Arredonda meio centavo para cima (2,675 -> R$ 2,68), sem os desvios de
+    ponto flutuante de ``f"{x:.2f}"``. Valores inválidos viram "R$ 0,00".
     """
     try:
-        # Converte para float se necessário
         if isinstance(value, str):
-            # Remove caracteres não numéricos exceto vírgula e ponto
-            value = re.sub(r'[^\d,.-]', '', value)
-            # Substitui vírgula por ponto para conversão
-            value = value.replace(',', '.')
-            value = float(value)
-        
-        # Formata com 2 casas decimais
-        formatted = f"{float(value):,.2f}"
-        
-        # Substitui vírgula por X, ponto por vírgula, X por ponto
-        formatted = formatted.replace(',', 'X').replace('.', ',').replace('X', '.')
-        
-        return f"R$ {formatted}"
-        
-    except (ValueError, TypeError):
+            amount = _parse_decimal(value)
+            if amount is None:
+                return "R$ 0,00"
+        else:
+            amount = Decimal(str(value))
+        amount = amount.quantize(_CENT, rounding=ROUND_HALF_UP)
+        sign = "-" if amount < 0 else ""
+    except (InvalidOperation, ValueError, TypeError):
         return "R$ 0,00"
+
+    formatted = f"{abs(amount):,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+    return f"{sign}R$ {formatted}"
+
 
 def parse_currency(value: str) -> Optional[float]:
     """
-    Converte string de moeda para float
-    
-    Args:
-        value: String com valor monetário
-        
+    Converte string de moeda para float ("R$ 1.500,50" -> 1500.5, "1.500" -> 1500.0).
+
     Returns:
         Float com o valor ou None se inválido
     """
-    try:
-        if not value:
-            return None
-            
-        # Remove caracteres não numéricos exceto vírgula e ponto
-        cleaned = re.sub(r'[^\d,.-]', '', value)
-        
-        if not cleaned:
-            return None
-        
-        # Se tem vírgula e ponto, assume formato brasileiro (1.500,50)
-        if ',' in cleaned and '.' in cleaned:
-            # Remove pontos de milhares e substitui vírgula por ponto
-            cleaned = cleaned.replace('.', '').replace(',', '.')
-        elif ',' in cleaned and '.' not in cleaned:
-            # Apenas vírgula, assume formato brasileiro
-            cleaned = cleaned.replace(',', '.')
-        
-        return float(cleaned)
-        
-    except (ValueError, TypeError):
-        return None
+    amount = _parse_decimal(value) if isinstance(value, str) else None
+    return float(amount) if amount is not None else None
 
 def format_date(date_input: Union[str, datetime]) -> str:
     """

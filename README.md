@@ -21,6 +21,8 @@ cd payroll-chatbot
 ```
 
 ### 2. Configure o ambiente Python
+Requer Python 3.11 ou superior.
+
 ```bash
 # Crie um ambiente virtual
 python -m venv venv
@@ -85,6 +87,17 @@ pytest tests/test_challenge_cases.py -v
 
 # Com cobertura
 pytest --cov=app
+```
+
+### Qualidade de código
+
+As regras do Ruff e do basedpyright ficam no `pyproject.toml`, e as extensões
+do editor usam a mesma configuração.
+
+```bash
+ruff check .       # lint
+ruff format .      # formatação
+basedpyright       # tipos (pip install basedpyright)
 ```
 
 ## 📊 Casos de Teste

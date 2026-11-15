@@ -1,0 +1,25 @@
+# Configuração das ferramentas de qualidade (Ruff e basedpyright).
+# As dependências continuam em requirements.txt.
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint.flake8-bugbear]
+# Depends(...) como valor padrão é o padrão do FastAPI, não um bug.
+extend-immutable-calls = ["fastapi.Depends"]
+
+[tool.basedpyright]
+include = ["app", "tests", "run.py"]
+venvPath = "."
+venv = "venv"
+pythonVersion = "3.11"
+typeCheckingMode = "recommended"
+
+# Regras do modo "recommended" que apontam preferência de estilo, não defeito:
+reportAny = false                          # proíbe qualquer uso de Any
+reportExplicitAny = false
+reportUnusedCallResult = false             # ex.: ignorar o bool de memory.add_message()
+reportImplicitStringConcatenation = false  # "texto " "longo" em várias linhas
+reportUnannotatedClassAttribute = false    # exige anotar cada self.x = ...
+reportCallInDefaultInitializer = false     # Depends(...) do FastAPI
